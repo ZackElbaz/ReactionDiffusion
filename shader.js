@@ -9,7 +9,7 @@ const vertexShaderSource = `
     }
 `;
 
-// Camera processing shader - inverts video and extracts CMY channels
+// Camera processing shader - maps RGB directly to CMY channels
 const cameraProcessShader = `
     precision highp float;
     varying vec2 v_texCoord;
@@ -19,14 +19,14 @@ const cameraProcessShader = `
         vec2 uv = vec2(v_texCoord.x, 1.0 - v_texCoord.y); // Flip Y
         vec4 color = texture2D(u_videoTexture, uv);
 
-        // Invert the RGB channels
-        // Red inverted -> Cyan concentration
-        // Green inverted -> Magenta concentration
-        // Blue inverted -> Yellow concentration
-        vec3 inverted = 1.0 - color.rgb;
+        // Direct RGB to CMY mapping (complementary colors)
+        // Red -> Cyan patterns
+        // Green -> Magenta patterns
+        // Blue -> Yellow patterns
+        vec3 cmy = color.rgb;
 
         // Output CMY channels as RGB for processing
-        gl_FragColor = vec4(inverted, 1.0);
+        gl_FragColor = vec4(cmy, 1.0);
     }
 `;
 
@@ -75,19 +75,22 @@ const reactionDiffusionShader = `
         float channelInfluence = 0.0;
 
         if (u_channel == 0) {
-            channelInfluence = cameraColor.r; // Cyan from inverted red
+            channelInfluence = cameraColor.r; // Cyan patterns from Red input
         } else if (u_channel == 1) {
-            channelInfluence = cameraColor.g; // Magenta from inverted green
+            channelInfluence = cameraColor.g; // Magenta patterns from Green input
         } else {
-            channelInfluence = cameraColor.b; // Yellow from inverted blue
+            channelInfluence = cameraColor.b; // Yellow patterns from Blue input
         }
 
-        // Modulate feed/kill rates based on camera input
-        // Where color is present, promote B growth; where absent, promote B decay
-        float localFeed = u_feed + channelInfluence * u_cameraInfluence * 0.01;
-        float localKill = u_kill + (1.0 - channelInfluence) * u_cameraInfluence * 0.01;
+        // Strong camera influence - patterns only form where color is present
+        float feedStrength = channelInfluence * u_cameraInfluence;
+        float killStrength = (1.0 - channelInfluence) * u_cameraInfluence;
 
-        // Standard Gray-Scott reaction-diffusion equations with local parameters
+        // Modulate feed/kill rates for localized patterns
+        float localFeed = u_feed + feedStrength * 0.04;
+        float localKill = u_kill + killStrength * 0.04;
+
+        // Gray-Scott reaction-diffusion equations
         float abb = a * b * b;
         float da = u_diffA * laplacian.r - abb + localFeed * (1.0 - a);
         float db = u_diffB * laplacian.g + abb - (localKill + localFeed) * b;
@@ -96,9 +99,12 @@ const reactionDiffusionShader = `
         a += da;
         b += db;
 
-        // Clamp values to valid range
+        // Clamp and sharpen for hard edges
         a = clamp(a, 0.0, 1.0);
         b = clamp(b, 0.0, 1.0);
+
+        // Apply threshold for harder edges
+        b = smoothstep(0.3, 0.7, b);
 
         gl_FragColor = vec4(a, b, 0.0, 1.0);
     }
@@ -167,13 +173,13 @@ class ReactionDiffusionApp {
             return;
         }
 
-        // Parameters (Gray-Scott coral/mitosis pattern range)
+        // Parameters for worm-like patterns (solitons/mitosis)
         this.params = {
-            feed: 0.055,
-            kill: 0.062,
+            feed: 0.078,
+            kill: 0.061,
             diffA: 1.0,
             diffB: 0.5,
-            cameraInfluence: 0.5  // Balance between camera influence and natural RD patterns
+            cameraInfluence: 0.9  // Strong influence - patterns follow camera closely
         };
 
         this.video = null;
