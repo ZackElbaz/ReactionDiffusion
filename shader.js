@@ -87,8 +87,8 @@ const reactionDiffusionShader = `
         float killStrength = (1.0 - channelInfluence) * u_cameraInfluence;
 
         // Modulate feed/kill rates for localized patterns
-        float localFeed = u_feed + feedStrength * 0.04;
-        float localKill = u_kill + killStrength * 0.04;
+        float localFeed = u_feed + feedStrength * 0.06;
+        float localKill = u_kill + killStrength * 0.08;
 
         // Gray-Scott reaction-diffusion equations
         float abb = a * b * b;
@@ -99,12 +99,12 @@ const reactionDiffusionShader = `
         a += da;
         b += db;
 
-        // Clamp and sharpen for hard edges
+        // Clamp to valid range
         a = clamp(a, 0.0, 1.0);
         b = clamp(b, 0.0, 1.0);
 
-        // Apply threshold for harder edges
-        b = smoothstep(0.3, 0.7, b);
+        // Sharp threshold for crisp lines (binary on/off)
+        b = step(0.5, b);
 
         gl_FragColor = vec4(a, b, 0.0, 1.0);
     }
@@ -173,14 +173,15 @@ class ReactionDiffusionApp {
             return;
         }
 
-        // Parameters for worm-like patterns (solitons/mitosis)
+        // Parameters for crisp maze-like patterns
         this.params = {
-            feed: 0.078,
-            kill: 0.061,
-            diffA: 1.0,
-            diffB: 0.5,
-            cameraInfluence: 0.9  // Strong influence - patterns follow camera closely
+            thickness: 0.5,      // Controls line thickness (via diffusion rates)
+            viscosity: 0.5,      // Controls pattern movement speed
+            cameraInfluence: 0.95  // Strong influence - patterns follow camera closely
         };
+
+        // Internal Gray-Scott parameters (calculated from thickness/viscosity)
+        this.updateGrayScottParams();
 
         this.video = null;
         this.videoTexture = null;
@@ -209,6 +210,23 @@ class ReactionDiffusionApp {
         // Use max resolution for better quality (matching input resolution)
         this.resolution = Math.max(width, height);
         console.log(`Canvas: ${width}x${height}, Simulation: ${this.resolution}`);
+    }
+
+    updateGrayScottParams() {
+        // Map thickness to diffusion rates
+        // Thinner lines = lower diffusion, thicker = higher diffusion
+        const thicknessScale = this.params.thickness;
+        this.diffA = 0.8 + thicknessScale * 0.4;  // Range: 0.8 - 1.2
+        this.diffB = 0.3 + thicknessScale * 0.4;  // Range: 0.3 - 0.7
+
+        // Use maze/labyrinth parameters for crisp lines
+        this.feed = 0.029;  // Fixed for maze patterns
+        this.kill = 0.057;  // Fixed for maze patterns
+
+        // Viscosity controls simulation speed (iterations per frame)
+        // Low viscosity = more iterations = faster movement
+        // High viscosity = fewer iterations = slower movement
+        this.iterationsPerFrame = Math.max(1, Math.floor(1 + (1.0 - this.params.viscosity) * 3));
     }
 
     showError(message) {
@@ -516,44 +534,25 @@ class ReactionDiffusionApp {
 
     setupControls() {
         const controls = {
-            feedRate: document.getElementById('feedRate'),
-            killRate: document.getElementById('killRate'),
-            diffA: document.getElementById('diffA'),
-            diffB: document.getElementById('diffB'),
-            cameraInfluence: document.getElementById('cameraInfluence')
+            thickness: document.getElementById('thickness'),
+            viscosity: document.getElementById('viscosity')
         };
 
         const values = {
-            feedRate: document.getElementById('feedValue'),
-            killRate: document.getElementById('killValue'),
-            diffA: document.getElementById('diffAValue'),
-            diffB: document.getElementById('diffBValue'),
-            cameraInfluence: document.getElementById('influenceValue')
+            thickness: document.getElementById('thicknessValue'),
+            viscosity: document.getElementById('viscosityValue')
         };
 
-        controls.feedRate.addEventListener('input', (e) => {
-            this.params.feed = parseFloat(e.target.value);
-            values.feedRate.textContent = this.params.feed.toFixed(3);
+        controls.thickness.addEventListener('input', (e) => {
+            this.params.thickness = parseFloat(e.target.value);
+            values.thickness.textContent = this.params.thickness.toFixed(2);
+            this.updateGrayScottParams();
         });
 
-        controls.killRate.addEventListener('input', (e) => {
-            this.params.kill = parseFloat(e.target.value);
-            values.killRate.textContent = this.params.kill.toFixed(3);
-        });
-
-        controls.diffA.addEventListener('input', (e) => {
-            this.params.diffA = parseFloat(e.target.value);
-            values.diffA.textContent = this.params.diffA.toFixed(2);
-        });
-
-        controls.diffB.addEventListener('input', (e) => {
-            this.params.diffB = parseFloat(e.target.value);
-            values.diffB.textContent = this.params.diffB.toFixed(2);
-        });
-
-        controls.cameraInfluence.addEventListener('input', (e) => {
-            this.params.cameraInfluence = parseFloat(e.target.value);
-            values.cameraInfluence.textContent = this.params.cameraInfluence.toFixed(2);
+        controls.viscosity.addEventListener('input', (e) => {
+            this.params.viscosity = parseFloat(e.target.value);
+            values.viscosity.textContent = this.params.viscosity.toFixed(2);
+            this.updateGrayScottParams();
         });
 
         // Input source selector
@@ -709,10 +708,10 @@ class ReactionDiffusionApp {
             this.resolution,
             this.resolution
         );
-        this.gl.uniform1f(this.gl.getUniformLocation(this.rdProgram, 'u_feed'), this.params.feed);
-        this.gl.uniform1f(this.gl.getUniformLocation(this.rdProgram, 'u_kill'), this.params.kill);
-        this.gl.uniform1f(this.gl.getUniformLocation(this.rdProgram, 'u_diffA'), this.params.diffA);
-        this.gl.uniform1f(this.gl.getUniformLocation(this.rdProgram, 'u_diffB'), this.params.diffB);
+        this.gl.uniform1f(this.gl.getUniformLocation(this.rdProgram, 'u_feed'), this.feed);
+        this.gl.uniform1f(this.gl.getUniformLocation(this.rdProgram, 'u_kill'), this.kill);
+        this.gl.uniform1f(this.gl.getUniformLocation(this.rdProgram, 'u_diffA'), this.diffA);
+        this.gl.uniform1f(this.gl.getUniformLocation(this.rdProgram, 'u_diffB'), this.diffB);
         this.gl.uniform1f(this.gl.getUniformLocation(this.rdProgram, 'u_cameraInfluence'), this.params.cameraInfluence);
 
         // Bind camera data
@@ -779,8 +778,8 @@ class ReactionDiffusionApp {
             this.processCameraData();
         }
 
-        // Run simulation multiple times per frame for smoother results
-        for (let i = 0; i < 2; i++) {
+        // Run simulation based on viscosity (lower viscosity = more iterations = faster)
+        for (let i = 0; i < this.iterationsPerFrame; i++) {
             this.simulateReactionDiffusion();
         }
 

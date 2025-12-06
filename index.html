@@ -149,24 +149,12 @@
             <button id="manualFileBtn" style="width: 100%; margin-top: 5px;">Click to Choose File</button>
         </div>
         <div class="control-group">
-            <label>Feed Rate: <span class="value" id="feedValue">0.078</span></label>
-            <input type="range" id="feedRate" min="0.01" max="0.1" step="0.001" value="0.078">
+            <label>Line Thickness: <span class="value" id="thicknessValue">0.50</span></label>
+            <input type="range" id="thickness" min="0.0" max="1.0" step="0.01" value="0.5">
         </div>
         <div class="control-group">
-            <label>Kill Rate: <span class="value" id="killValue">0.061</span></label>
-            <input type="range" id="killRate" min="0.01" max="0.1" step="0.001" value="0.061">
-        </div>
-        <div class="control-group">
-            <label>Diffusion A: <span class="value" id="diffAValue">1.0</span></label>
-            <input type="range" id="diffA" min="0.1" max="2.0" step="0.01" value="1.0">
-        </div>
-        <div class="control-group">
-            <label>Diffusion B: <span class="value" id="diffBValue">0.5</span></label>
-            <input type="range" id="diffB" min="0.1" max="2.0" step="0.01" value="0.5">
-        </div>
-        <div class="control-group">
-            <label>Camera Influence: <span class="value" id="influenceValue">0.9</span></label>
-            <input type="range" id="cameraInfluence" min="0.0" max="1.0" step="0.01" value="0.9">
+            <label>Viscosity: <span class="value" id="viscosityValue">0.50</span></label>
+            <input type="range" id="viscosity" min="0.0" max="1.0" step="0.01" value="0.5">
         </div>
         <button id="resetBtn">Reset Simulation</button>
         <button id="toggleControls">Hide Controls</button>
