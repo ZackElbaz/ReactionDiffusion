@@ -154,7 +154,7 @@ const initShader = `
 class ReactionDiffusionApp {
     constructor() {
         this.canvas = document.getElementById('glCanvas');
-        this.gl = this.canvas.createContext('webgl', {
+        this.gl = this.canvas.getContext('webgl', {
             preserveDrawingBuffer: true,
             premultipliedAlpha: false
         });
