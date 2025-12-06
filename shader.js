@@ -87,8 +87,10 @@ const reactionDiffusionShader = `
         float da = u_diffA * laplacian.r - abb + u_feed * (1.0 - a);
         float db = u_diffB * laplacian.g + abb - (u_kill + u_feed) * b;
 
-        // Add camera influence to feed the B chemical
-        db += channelInfluence * u_cameraInfluence * 0.01;
+        // Strongly push B chemical toward camera input
+        // When camera shows the color, add B; when it doesn't, remove B
+        float targetB = channelInfluence * 0.8;
+        db += (targetB - b) * u_cameraInfluence * 0.15;
 
         // Update state
         a += da;
@@ -116,16 +118,22 @@ const compositingShader = `
         float magenta = texture2D(u_magentaLayer, v_texCoord).g;
         float yellow = texture2D(u_yellowLayer, v_texCoord).g;
 
-        // Subtractive color mixing (CMY to RGB)
+        // Subtractive color mixing (CMY to RGB) at 100% opacity
+        // In subtractive mixing: RGB = White - CMY
         // Cyan absorbs red, Magenta absorbs green, Yellow absorbs blue
-        // RGB = 1 - CMY
         vec3 rgb;
-        rgb.r = 1.0 - min(1.0, cyan + magenta);      // Red = 1 - (Cyan + Magenta)
-        rgb.g = 1.0 - min(1.0, cyan + yellow);       // Green = 1 - (Cyan + Yellow)
-        rgb.b = 1.0 - min(1.0, magenta + yellow);    // Blue = 1 - (Magenta + Yellow)
+        rgb.r = 1.0 - cyan;           // Red is removed by cyan
+        rgb.g = 1.0 - magenta;        // Green is removed by magenta
+        rgb.b = 1.0 - yellow;         // Blue is removed by yellow
 
-        // Boost contrast for better visibility
-        rgb = pow(rgb, vec3(0.8));
+        // Where colors overlap, multiply the remaining light
+        float totalInk = cyan + magenta + yellow;
+        if (totalInk > 0.0) {
+            // CMY overlap creates darker colors through multiplication
+            rgb.r *= (1.0 - magenta);  // Magenta also removes red
+            rgb.g *= (1.0 - yellow);   // Yellow also removes green
+            rgb.b *= (1.0 - cyan);     // Cyan also removes blue
+        }
 
         gl_FragColor = vec4(rgb, 1.0);
     }
@@ -170,16 +178,32 @@ class ReactionDiffusionApp {
             kill: 0.062,
             diffA: 1.0,
             diffB: 0.5,
-            cameraInfluence: 0.5
+            cameraInfluence: 0.8  // Higher influence makes colors track camera more closely
         };
 
-        this.resolution = 512; // Fixed resolution for simulation
         this.video = null;
         this.videoTexture = null;
         this.inputSource = 'camera'; // 'camera', 'video', or 'image'
         this.mediaElement = null; // Can be video or image element
 
+        // Set canvas to fill window
+        this.resizeCanvas();
+        window.addEventListener('resize', () => this.resizeCanvas());
+
         this.init();
+    }
+
+    resizeCanvas() {
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+
+        // Use window dimensions for canvas
+        this.canvas.width = width;
+        this.canvas.height = height;
+
+        // Use lower resolution for simulation (performance)
+        this.resolution = Math.min(width, height, 1024);
+        console.log(`Canvas: ${width}x${height}, Simulation: ${this.resolution}x${this.resolution}`);
     }
 
     showError(message) {
@@ -399,10 +423,6 @@ class ReactionDiffusionApp {
     }
 
     async init() {
-        // Set canvas size
-        this.canvas.width = this.resolution;
-        this.canvas.height = this.resolution;
-
         // Set clear color to white for subtractive color mixing
         this.gl.clearColor(1.0, 1.0, 1.0, 1.0);
 
