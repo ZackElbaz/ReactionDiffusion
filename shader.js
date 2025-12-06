@@ -270,6 +270,13 @@ class ReactionDiffusionApp {
 
     async setupCamera() {
         try {
+            console.log('Requesting camera access...');
+
+            // Check if getUserMedia is supported
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                throw new Error('Camera API not supported in this browser');
+            }
+
             const stream = await navigator.mediaDevices.getUserMedia({
                 video: {
                     width: { ideal: 1280 },
@@ -277,6 +284,8 @@ class ReactionDiffusionApp {
                     facingMode: 'user'
                 }
             });
+
+            console.log('Camera access granted!');
 
             this.video = document.createElement('video');
             this.video.srcObject = stream;
@@ -286,6 +295,7 @@ class ReactionDiffusionApp {
             await new Promise((resolve) => {
                 this.video.onloadedmetadata = () => {
                     this.video.play();
+                    console.log('Video playing:', this.video.videoWidth, 'x', this.video.videoHeight);
                     resolve();
                 };
             });
@@ -293,8 +303,22 @@ class ReactionDiffusionApp {
             this.videoTexture = this.createTexture(this.video.videoWidth, this.video.videoHeight);
 
         } catch (err) {
-            this.showError('Camera access denied: ' + err.message);
             console.error('Camera error:', err);
+            let errorMsg = 'Camera Error: ';
+
+            if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+                errorMsg += 'Permission denied. Please allow camera access and reload the page.';
+            } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+                errorMsg += 'No camera found on this device.';
+            } else if (err.name === 'NotReadableError') {
+                errorMsg += 'Camera is already in use by another application.';
+            } else if (err.name === 'SecurityError') {
+                errorMsg += 'Camera blocked. Try using http://localhost instead of file://.';
+            } else {
+                errorMsg += err.message;
+            }
+
+            this.showError(errorMsg + '\n\nClick Reset to try again.');
         }
     }
 
@@ -428,8 +452,13 @@ class ReactionDiffusionApp {
             values.cameraInfluence.textContent = this.params.cameraInfluence.toFixed(2);
         });
 
-        document.getElementById('resetBtn').addEventListener('click', () => {
+        document.getElementById('resetBtn').addEventListener('click', async () => {
             this.resetSimulation();
+            // Also retry camera if it failed
+            if (!this.video || !this.video.srcObject) {
+                document.getElementById('error').style.display = 'none';
+                await this.setupCamera();
+            }
         });
 
         const controlsDiv = document.getElementById('controls');
