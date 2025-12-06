@@ -37,12 +37,20 @@ Where:
 - `k`: Kill rate
 - `∇²`: Laplacian operator
 
-### Camera Integration
+### Input Sources
 
-1. **Video Capture**: Access device camera using WebMediaDevices API
+The shader supports three input types:
+
+1. **Camera**: Live webcam feed using WebMediaDevices API
+2. **Video File**: Upload a video file from your computer (loops automatically)
+3. **Image File**: Upload a static image as input
+
+### Input Processing
+
+1. **Capture/Load**: Get input from camera, video file, or image file
 2. **Inversion**: RGB channels are inverted to get CMY values
 3. **Layer Mapping**: Each CMY channel feeds into its corresponding reaction-diffusion layer
-4. **Influence**: Camera data affects the B chemical concentration in each layer
+4. **Influence**: Input data affects the B chemical concentration in each layer
 5. **Compositing**: Three layers are combined using subtractive color mixing
 
 ### Color Mixing
@@ -83,12 +91,21 @@ Then navigate to `http://localhost:8000`
 
 ## Controls
 
+### Input Source
+- **Input Source Selector**: Choose between Camera, Video File, or Image File
+  - **Camera**: Uses your webcam (requires permission)
+  - **Video File**: Upload a video from your computer (MP4, WebM, etc.)
+  - **Image File**: Upload a static image (PNG, JPG, etc.)
+
+### Reaction-Diffusion Parameters
 - **Feed Rate** (0.01 - 0.1): Controls how quickly chemical A is added to the system
 - **Kill Rate** (0.01 - 0.1): Controls how quickly chemical B is removed
 - **Diffusion A** (0.1 - 2.0): Diffusion rate for chemical A
 - **Diffusion B** (0.1 - 2.0): Diffusion rate for chemical B
-- **Camera Influence** (0.0 - 1.0): How strongly the camera input affects the simulation
-- **Reset Simulation**: Reinitialize the simulation with random seed
+- **Camera Influence** (0.0 - 1.0): How strongly the input affects the simulation
+
+### Actions
+- **Reset Simulation**: Reinitialize the simulation with random seed (also retries camera if failed)
 - **Hide/Show Controls**: Toggle the control panel visibility
 
 ## Parameter Presets
@@ -148,15 +165,17 @@ Try these parameter combinations for different effects:
 - ✅ Firefox
 - ✅ Safari (iOS may require HTTPS)
 - ⚠️ Requires WebGL support
-- ⚠️ Requires camera access permissions
+- 📷 Camera access optional (can use video/image files instead)
 
 ## Troubleshooting
 
 ### Camera not working
-- Ensure you granted camera permissions
+- **Quick solution**: Select "Video File" or "Image File" from the Input Source dropdown and upload a file instead
+- Ensure you granted camera permissions when prompted
 - Check if another application is using the camera
-- Try using HTTPS (required on some browsers)
-- Check browser console for errors
+- Try using `http://localhost:8000` instead of opening the file directly (file://)
+- Try using HTTPS (required on some browsers for camera access)
+- Check browser console (F12) for detailed error messages
 
 ### Poor performance
 - Close other GPU-intensive applications
