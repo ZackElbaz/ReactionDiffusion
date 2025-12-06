@@ -535,10 +535,11 @@ class ReactionDiffusionApp {
         const inputSourceSelect = document.getElementById('inputSource');
         const fileInputGroup = document.getElementById('fileInputGroup');
         const fileInput = document.getElementById('fileInput');
+        const manualFileBtn = document.getElementById('manualFileBtn');
 
         inputSourceSelect.addEventListener('change', (e) => {
             this.inputSource = e.target.value;
-            console.log('Input source changed to:', this.inputSource);
+            console.log('📋 Input source changed to:', this.inputSource);
 
             // Stop any current input first
             this.stopCurrentInput();
@@ -546,18 +547,30 @@ class ReactionDiffusionApp {
 
             if (this.inputSource === 'camera') {
                 fileInputGroup.style.display = 'none';
-                console.log('Switching to camera mode - requesting camera access...');
+                console.log('📷 Switching to camera mode - requesting camera access...');
                 this.setupCamera();
             } else {
                 fileInputGroup.style.display = 'block';
                 fileInput.value = ''; // Clear previous selection
-                console.log('Opening file selector for', this.inputSource);
+                console.log('📁 File input mode activated. Click the button or file input to select a', this.inputSource);
 
-                // Automatically trigger file selector
+                // Try to automatically trigger file selector
+                // This may be blocked by browser security, so we also provide a manual button
                 setTimeout(() => {
-                    fileInput.click();
+                    console.log('⚡ Attempting to auto-open file selector...');
+                    try {
+                        fileInput.click();
+                    } catch (err) {
+                        console.log('⚠️ Auto-open blocked. Please click the "Choose File" button.');
+                    }
                 }, 100);
             }
+        });
+
+        // Manual file button (fallback if auto-trigger doesn't work)
+        manualFileBtn.addEventListener('click', () => {
+            console.log('👆 Manual file button clicked');
+            fileInput.click();
         });
 
         fileInput.addEventListener('change', async (e) => {
@@ -736,8 +749,10 @@ class ReactionDiffusionApp {
         // Update video texture
         this.updateVideoTexture();
 
-        // Process camera data
-        this.processCameraData();
+        // Process camera data (only if we have media)
+        if (this.mediaElement || this.videoTexture) {
+            this.processCameraData();
+        }
 
         // Run simulation multiple times per frame for smoother results
         for (let i = 0; i < 2; i++) {
@@ -753,5 +768,13 @@ class ReactionDiffusionApp {
 
 // Start the app when page loads
 window.addEventListener('load', () => {
-    new ReactionDiffusionApp();
+    console.log('🚀 Page loaded, initializing CMY Reaction Diffusion...');
+    console.log('💡 Check the controls panel on the top-left of the screen');
+    console.log('📱 Select your input source from the dropdown: Camera, Video File, or Image File');
+    try {
+        new ReactionDiffusionApp();
+        console.log('✅ App initialized successfully!');
+    } catch (err) {
+        console.error('❌ Failed to initialize app:', err);
+    }
 });
