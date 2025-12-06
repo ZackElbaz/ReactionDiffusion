@@ -9,7 +9,7 @@
             margin: 0;
             padding: 0;
             overflow: hidden;
-            background: #000;
+            background: #fff;
             font-family: Arial, sans-serif;
         }
 
@@ -31,12 +31,14 @@
             position: absolute;
             top: 10px;
             left: 10px;
-            background: rgba(0, 0, 0, 0.7);
-            color: white;
+            background: rgba(255, 255, 255, 0.95);
+            color: #000;
             padding: 15px;
             border-radius: 8px;
             font-size: 12px;
             max-width: 300px;
+            border: 1px solid #ccc;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
         }
 
         #controls h3 {
@@ -66,16 +68,17 @@
         select, input[type="file"] {
             width: 100%;
             padding: 6px;
-            background: #333;
-            color: white;
-            border: 1px solid #555;
+            background: #fff;
+            color: #000;
+            border: 1px solid #ccc;
             border-radius: 4px;
             font-size: 12px;
             margin-top: 3px;
         }
 
         select:focus, input[type="file"]:focus {
-            outline: 1px solid #888;
+            outline: 2px solid #4CAF50;
+            border-color: #4CAF50;
         }
 
         input[type="file"] {
@@ -83,8 +86,22 @@
             cursor: pointer;
         }
 
+        input[type="file"]::file-selector-button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+
+        input[type="file"]::file-selector-button:hover {
+            background: #45a049;
+        }
+
         button {
-            background: #444;
+            background: #4CAF50;
             color: white;
             border: none;
             padding: 8px 12px;
@@ -94,7 +111,7 @@
         }
 
         button:hover {
-            background: #666;
+            background: #45a049;
         }
 
         #error {
@@ -126,6 +143,7 @@
             </select>
         </div>
         <div class="control-group" id="fileInputGroup" style="display: none;">
+            <label for="fileInput">Select File:</label>
             <input type="file" id="fileInput" accept="image/*,video/*">
         </div>
         <div class="control-group">

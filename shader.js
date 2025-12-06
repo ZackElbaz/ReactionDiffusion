@@ -402,6 +402,9 @@ class ReactionDiffusionApp {
         this.canvas.width = this.resolution;
         this.canvas.height = this.resolution;
 
+        // Set clear color to white for subtractive color mixing
+        this.gl.clearColor(1.0, 1.0, 1.0, 1.0);
+
         // Create programs
         this.cameraProgram = this.createProgram(vertexShaderSource, cameraProcessShader);
         this.rdProgram = this.createProgram(vertexShaderSource, reactionDiffusionShader);
@@ -448,14 +451,14 @@ class ReactionDiffusionApp {
 
         this.currentBuffer = 'ping';
 
-        // Setup camera
-        await this.setupCamera();
-
         // Initialize layers
         this.initializeLayers();
 
-        // Setup controls
+        // Setup controls (must be before camera setup to bind events first)
         this.setupControls();
+
+        // Setup camera by default (after controls are ready)
+        await this.setupCamera();
 
         // Start render loop
         this.render();
@@ -534,15 +537,20 @@ class ReactionDiffusionApp {
 
         inputSourceSelect.addEventListener('change', (e) => {
             this.inputSource = e.target.value;
+            console.log('Input source changed to:', this.inputSource);
+
+            // Stop any current input first
+            this.stopCurrentInput();
+            document.getElementById('error').style.display = 'none';
 
             if (this.inputSource === 'camera') {
                 fileInputGroup.style.display = 'none';
-                this.stopCurrentInput();
-                document.getElementById('error').style.display = 'none';
+                console.log('Switching to camera mode');
                 this.setupCamera();
             } else {
                 fileInputGroup.style.display = 'block';
                 fileInput.value = ''; // Clear previous selection
+                console.log('File input group shown, ready for', this.inputSource, 'file');
             }
         });
 
@@ -686,6 +694,9 @@ class ReactionDiffusionApp {
     composite() {
         this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
         this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+
+        // Clear to white for subtractive color mixing
+        this.gl.clear(this.gl.COLOR_BUFFER_BIT);
 
         this.gl.useProgram(this.compositingProgram);
 
