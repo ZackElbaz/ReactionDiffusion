@@ -272,7 +272,8 @@ class ReactionDiffusionApp {
 
     async setupCamera() {
         try {
-            console.log('Requesting camera access...');
+            console.log('🎥 Requesting camera access...');
+            console.log('You should see a browser permission prompt now.');
 
             // Check if getUserMedia is supported
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -287,7 +288,7 @@ class ReactionDiffusionApp {
                 }
             });
 
-            console.log('Camera access granted!');
+            console.log('✅ Camera access granted!');
 
             this.video = document.createElement('video');
             this.video.srcObject = stream;
@@ -545,18 +546,28 @@ class ReactionDiffusionApp {
 
             if (this.inputSource === 'camera') {
                 fileInputGroup.style.display = 'none';
-                console.log('Switching to camera mode');
+                console.log('Switching to camera mode - requesting camera access...');
                 this.setupCamera();
             } else {
                 fileInputGroup.style.display = 'block';
                 fileInput.value = ''; // Clear previous selection
-                console.log('File input group shown, ready for', this.inputSource, 'file');
+                console.log('Opening file selector for', this.inputSource);
+
+                // Automatically trigger file selector
+                setTimeout(() => {
+                    fileInput.click();
+                }, 100);
             }
         });
 
         fileInput.addEventListener('change', async (e) => {
             const file = e.target.files[0];
-            if (!file) return;
+            if (!file) {
+                console.log('No file selected. You can select', this.inputSource, 'again from the dropdown or click the file input.');
+                return;
+            }
+
+            console.log('File selected:', file.name, '(' + (file.size / 1024 / 1024).toFixed(2) + ' MB)');
 
             this.stopCurrentInput();
             document.getElementById('error').style.display = 'none';
