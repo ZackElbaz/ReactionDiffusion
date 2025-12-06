@@ -82,21 +82,21 @@ const reactionDiffusionShader = `
             channelInfluence = cameraColor.b; // Yellow from inverted blue
         }
 
-        // Gray-Scott reaction-diffusion equations
-        float abb = a * b * b;
-        float da = u_diffA * laplacian.r - abb + u_feed * (1.0 - a);
-        float db = u_diffB * laplacian.g + abb - (u_kill + u_feed) * b;
+        // Modulate feed/kill rates based on camera input
+        // Where color is present, promote B growth; where absent, promote B decay
+        float localFeed = u_feed + channelInfluence * u_cameraInfluence * 0.01;
+        float localKill = u_kill + (1.0 - channelInfluence) * u_cameraInfluence * 0.01;
 
-        // Strongly push B chemical toward camera input
-        // When camera shows the color, add B; when it doesn't, remove B
-        float targetB = channelInfluence * 0.8;
-        db += (targetB - b) * u_cameraInfluence * 0.15;
+        // Standard Gray-Scott reaction-diffusion equations with local parameters
+        float abb = a * b * b;
+        float da = u_diffA * laplacian.r - abb + localFeed * (1.0 - a);
+        float db = u_diffB * laplacian.g + abb - (localKill + localFeed) * b;
 
         // Update state
         a += da;
         b += db;
 
-        // Clamp values
+        // Clamp values to valid range
         a = clamp(a, 0.0, 1.0);
         b = clamp(b, 0.0, 1.0);
 
@@ -118,22 +118,17 @@ const compositingShader = `
         float magenta = texture2D(u_magentaLayer, v_texCoord).g;
         float yellow = texture2D(u_yellowLayer, v_texCoord).g;
 
-        // Subtractive color mixing (CMY to RGB) at 100% opacity
-        // In subtractive mixing: RGB = White - CMY
-        // Cyan absorbs red, Magenta absorbs green, Yellow absorbs blue
-        vec3 rgb;
-        rgb.r = 1.0 - cyan;           // Red is removed by cyan
-        rgb.g = 1.0 - magenta;        // Green is removed by magenta
-        rgb.b = 1.0 - yellow;         // Blue is removed by yellow
+        // Proper subtractive color mixing (CMY inks on white paper)
+        // Each ink absorbs specific wavelengths:
+        // - Cyan absorbs Red and Magenta absorbs Red = darker red absorption
+        // - Magenta absorbs Green and Yellow absorbs Green = darker green absorption
+        // - Cyan absorbs Blue and Yellow absorbs Blue = darker blue absorption
+        vec3 rgb = vec3(1.0); // Start with white
 
-        // Where colors overlap, multiply the remaining light
-        float totalInk = cyan + magenta + yellow;
-        if (totalInk > 0.0) {
-            // CMY overlap creates darker colors through multiplication
-            rgb.r *= (1.0 - magenta);  // Magenta also removes red
-            rgb.g *= (1.0 - yellow);   // Yellow also removes green
-            rgb.b *= (1.0 - cyan);     // Cyan also removes blue
-        }
+        // Multiply by what each ink DOESN'T absorb (transmits)
+        rgb.r *= (1.0 - cyan) * (1.0 - magenta);     // Red absorbed by Cyan and Magenta
+        rgb.g *= (1.0 - magenta) * (1.0 - yellow);   // Green absorbed by Magenta and Yellow
+        rgb.b *= (1.0 - cyan) * (1.0 - yellow);      // Blue absorbed by Cyan and Yellow
 
         gl_FragColor = vec4(rgb, 1.0);
     }
@@ -172,13 +167,13 @@ class ReactionDiffusionApp {
             return;
         }
 
-        // Parameters
+        // Parameters (Gray-Scott coral/mitosis pattern range)
         this.params = {
             feed: 0.055,
             kill: 0.062,
             diffA: 1.0,
             diffB: 0.5,
-            cameraInfluence: 0.8  // Higher influence makes colors track camera more closely
+            cameraInfluence: 0.5  // Balance between camera influence and natural RD patterns
         };
 
         this.video = null;
@@ -197,13 +192,17 @@ class ReactionDiffusionApp {
         const width = window.innerWidth;
         const height = window.innerHeight;
 
-        // Use window dimensions for canvas
+        // Set canvas to fill window
         this.canvas.width = width;
         this.canvas.height = height;
 
-        // Use lower resolution for simulation (performance)
-        this.resolution = Math.min(width, height, 1024);
-        console.log(`Canvas: ${width}x${height}, Simulation: ${this.resolution}x${this.resolution}`);
+        // Store dimensions for aspect ratio calculations
+        this.canvasWidth = width;
+        this.canvasHeight = height;
+
+        // Use max resolution for better quality (matching input resolution)
+        this.resolution = Math.max(width, height);
+        console.log(`Canvas: ${width}x${height}, Simulation: ${this.resolution}`);
     }
 
     showError(message) {
