@@ -9,7 +9,7 @@ const vertexShaderSource = `
     }
 `;
 
-// Camera processing shader - maps RGB directly to CMY channels
+// Camera processing shader - converts to greyscale
 const cameraProcessShader = `
     precision highp float;
     varying vec2 v_texCoord;
@@ -19,18 +19,17 @@ const cameraProcessShader = `
         vec2 uv = vec2(v_texCoord.x, 1.0 - v_texCoord.y); // Flip Y
         vec4 color = texture2D(u_videoTexture, uv);
 
-        // Direct RGB to CMY mapping (complementary colors)
-        // Red -> Cyan patterns
-        // Green -> Magenta patterns
-        // Blue -> Yellow patterns
-        vec3 cmy = color.rgb;
+        // Convert to greyscale (luminance)
+        float grey = dot(color.rgb, vec3(0.299, 0.587, 0.114));
 
-        // Output CMY channels as RGB for processing
-        gl_FragColor = vec4(cmy, 1.0);
+        // Invert so darker areas = higher value (patterns form in dark areas)
+        float inverted = 1.0 - grey;
+
+        gl_FragColor = vec4(inverted, inverted, inverted, 1.0);
     }
 `;
 
-// Reaction-Diffusion shader using Gray-Scott model
+// Reaction-Diffusion shader using Gray-Scott model (Karl Sims' math)
 const reactionDiffusionShader = `
     precision highp float;
     varying vec2 v_texCoord;
@@ -41,8 +40,6 @@ const reactionDiffusionShader = `
     uniform float u_kill;
     uniform float u_diffA;
     uniform float u_diffB;
-    uniform float u_cameraInfluence;
-    uniform int u_channel; // 0 = Cyan, 1 = Magenta, 2 = Yellow
 
     void main() {
         vec2 pixel = 1.0 / u_resolution;
@@ -70,27 +67,16 @@ const reactionDiffusionShader = `
         laplacian += texture2D(u_state, v_texCoord + vec2(pixel.x, -pixel.y)).rg * 0.05;
         laplacian += texture2D(u_state, v_texCoord + vec2(-pixel.x, -pixel.y)).rg * 0.05;
 
-        // Get camera influence for this channel
-        vec3 cameraColor = texture2D(u_cameraData, v_texCoord).rgb;
-        float channelInfluence = 0.0;
+        // Get camera darkness (darker = more pattern)
+        float darkness = texture2D(u_cameraData, v_texCoord).r;
 
-        if (u_channel == 0) {
-            channelInfluence = cameraColor.r; // Cyan patterns from Red input
-        } else if (u_channel == 1) {
-            channelInfluence = cameraColor.g; // Magenta patterns from Green input
-        } else {
-            channelInfluence = cameraColor.b; // Yellow patterns from Blue input
-        }
+        // Spatially varying feed/kill rates based on camera darkness
+        // Dark areas = lower kill rate = patterns survive
+        // Light areas = higher kill rate = patterns die
+        float localFeed = u_feed;
+        float localKill = u_kill + (1.0 - darkness) * 0.03;
 
-        // Strong camera influence - patterns only form where color is present
-        float feedStrength = channelInfluence * u_cameraInfluence;
-        float killStrength = (1.0 - channelInfluence) * u_cameraInfluence;
-
-        // Modulate feed/kill rates for localized patterns
-        float localFeed = u_feed + feedStrength * 0.06;
-        float localKill = u_kill + killStrength * 0.08;
-
-        // Gray-Scott reaction-diffusion equations
+        // Pure Gray-Scott equations (Karl Sims' math)
         float abb = a * b * b;
         float da = u_diffA * laplacian.r - abb + localFeed * (1.0 - a);
         float db = u_diffB * laplacian.g + abb - (localKill + localFeed) * b;
@@ -103,38 +89,25 @@ const reactionDiffusionShader = `
         a = clamp(a, 0.0, 1.0);
         b = clamp(b, 0.0, 1.0);
 
-        // Sharp threshold for crisp lines (binary on/off)
+        // Binary threshold for crisp patterns
         b = step(0.5, b);
 
         gl_FragColor = vec4(a, b, 0.0, 1.0);
     }
 `;
 
-// Compositing shader - combines CMY layers using subtractive color mixing
+// Compositing shader - outputs greyscale pattern (black on white)
 const compositingShader = `
     precision highp float;
     varying vec2 v_texCoord;
-    uniform sampler2D u_cyanLayer;
-    uniform sampler2D u_magentaLayer;
-    uniform sampler2D u_yellowLayer;
+    uniform sampler2D u_state;
 
     void main() {
-        // Get the B chemical (the visible pattern) from each layer
-        float cyan = texture2D(u_cyanLayer, v_texCoord).g;
-        float magenta = texture2D(u_magentaLayer, v_texCoord).g;
-        float yellow = texture2D(u_yellowLayer, v_texCoord).g;
+        // Get the B chemical (the visible pattern)
+        float pattern = texture2D(u_state, v_texCoord).g;
 
-        // Proper subtractive color mixing (CMY inks on white paper)
-        // Each ink absorbs specific wavelengths:
-        // - Cyan absorbs Red and Magenta absorbs Red = darker red absorption
-        // - Magenta absorbs Green and Yellow absorbs Green = darker green absorption
-        // - Cyan absorbs Blue and Yellow absorbs Blue = darker blue absorption
-        vec3 rgb = vec3(1.0); // Start with white
-
-        // Multiply by what each ink DOESN'T absorb (transmits)
-        rgb.r *= (1.0 - cyan) * (1.0 - magenta);     // Red absorbed by Cyan and Magenta
-        rgb.g *= (1.0 - magenta) * (1.0 - yellow);   // Green absorbed by Magenta and Yellow
-        rgb.b *= (1.0 - cyan) * (1.0 - yellow);      // Blue absorbed by Cyan and Yellow
+        // Black pattern on white background
+        vec3 rgb = vec3(1.0 - pattern);
 
         gl_FragColor = vec4(rgb, 1.0);
     }
@@ -458,35 +431,15 @@ class ReactionDiffusionApp {
         // Setup quad
         this.quadBuffer = this.setupQuad();
 
-        // Create textures and framebuffers for 3 CMY layers (ping-pong)
-        this.layers = {
-            cyan: {
-                ping: this.createTexture(this.resolution, this.resolution),
-                pong: this.createTexture(this.resolution, this.resolution)
-            },
-            magenta: {
-                ping: this.createTexture(this.resolution, this.resolution),
-                pong: this.createTexture(this.resolution, this.resolution)
-            },
-            yellow: {
-                ping: this.createTexture(this.resolution, this.resolution),
-                pong: this.createTexture(this.resolution, this.resolution)
-            }
+        // Create textures and framebuffers for single RD layer (ping-pong)
+        this.stateTextures = {
+            ping: this.createTexture(this.resolution, this.resolution),
+            pong: this.createTexture(this.resolution, this.resolution)
         };
 
         this.framebuffers = {
-            cyan: {
-                ping: this.createFramebuffer(this.layers.cyan.ping),
-                pong: this.createFramebuffer(this.layers.cyan.pong)
-            },
-            magenta: {
-                ping: this.createFramebuffer(this.layers.magenta.ping),
-                pong: this.createFramebuffer(this.layers.magenta.pong)
-            },
-            yellow: {
-                ping: this.createFramebuffer(this.layers.yellow.ping),
-                pong: this.createFramebuffer(this.layers.yellow.pong)
-            }
+            ping: this.createFramebuffer(this.stateTextures.ping),
+            pong: this.createFramebuffer(this.stateTextures.pong)
         };
 
         // Camera data texture
@@ -518,14 +471,13 @@ class ReactionDiffusionApp {
 
         this.gl.useProgram(this.initProgram);
 
-        // Initialize each layer
-        ['cyan', 'magenta', 'yellow'].forEach(layer => {
-            this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.framebuffers[layer].ping);
-            this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
+        // Initialize ping buffer
+        this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.framebuffers.ping);
+        this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
 
-            this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.framebuffers[layer].pong);
-            this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
-        });
+        // Initialize pong buffer
+        this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.framebuffers.pong);
+        this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
     }
 
     resetSimulation() {
@@ -712,7 +664,6 @@ class ReactionDiffusionApp {
         this.gl.uniform1f(this.gl.getUniformLocation(this.rdProgram, 'u_kill'), this.kill);
         this.gl.uniform1f(this.gl.getUniformLocation(this.rdProgram, 'u_diffA'), this.diffA);
         this.gl.uniform1f(this.gl.getUniformLocation(this.rdProgram, 'u_diffB'), this.diffB);
-        this.gl.uniform1f(this.gl.getUniformLocation(this.rdProgram, 'u_cameraInfluence'), this.params.cameraInfluence);
 
         // Bind camera data
         this.gl.activeTexture(this.gl.TEXTURE1);
@@ -720,21 +671,15 @@ class ReactionDiffusionApp {
         this.gl.uniform1i(this.gl.getUniformLocation(this.rdProgram, 'u_cameraData'), 1);
 
         const nextBuffer = this.currentBuffer === 'ping' ? 'pong' : 'ping';
-        const layers = ['cyan', 'magenta', 'yellow'];
 
-        layers.forEach((layer, index) => {
-            // Set current state texture
-            this.gl.activeTexture(this.gl.TEXTURE0);
-            this.gl.bindTexture(this.gl.TEXTURE_2D, this.layers[layer][this.currentBuffer]);
-            this.gl.uniform1i(this.gl.getUniformLocation(this.rdProgram, 'u_state'), 0);
+        // Set current state texture
+        this.gl.activeTexture(this.gl.TEXTURE0);
+        this.gl.bindTexture(this.gl.TEXTURE_2D, this.stateTextures[this.currentBuffer]);
+        this.gl.uniform1i(this.gl.getUniformLocation(this.rdProgram, 'u_state'), 0);
 
-            // Set channel
-            this.gl.uniform1i(this.gl.getUniformLocation(this.rdProgram, 'u_channel'), index);
-
-            // Render to next buffer
-            this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.framebuffers[layer][nextBuffer]);
-            this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
-        });
+        // Render to next buffer
+        this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.framebuffers[nextBuffer]);
+        this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
 
         this.currentBuffer = nextBuffer;
     }
@@ -743,7 +688,7 @@ class ReactionDiffusionApp {
         this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
         this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
 
-        // Clear to white for subtractive color mixing
+        // Clear to white background
         this.gl.clear(this.gl.COLOR_BUFFER_BIT);
 
         this.gl.useProgram(this.compositingProgram);
@@ -753,18 +698,10 @@ class ReactionDiffusionApp {
         this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.quadBuffer);
         this.gl.vertexAttribPointer(posLoc, 2, this.gl.FLOAT, false, 0, 0);
 
-        // Bind the three layers
+        // Bind the state texture
         this.gl.activeTexture(this.gl.TEXTURE0);
-        this.gl.bindTexture(this.gl.TEXTURE_2D, this.layers.cyan[this.currentBuffer]);
-        this.gl.uniform1i(this.gl.getUniformLocation(this.compositingProgram, 'u_cyanLayer'), 0);
-
-        this.gl.activeTexture(this.gl.TEXTURE1);
-        this.gl.bindTexture(this.gl.TEXTURE_2D, this.layers.magenta[this.currentBuffer]);
-        this.gl.uniform1i(this.gl.getUniformLocation(this.compositingProgram, 'u_magentaLayer'), 1);
-
-        this.gl.activeTexture(this.gl.TEXTURE2);
-        this.gl.bindTexture(this.gl.TEXTURE_2D, this.layers.yellow[this.currentBuffer]);
-        this.gl.uniform1i(this.gl.getUniformLocation(this.compositingProgram, 'u_yellowLayer'), 2);
+        this.gl.bindTexture(this.gl.TEXTURE_2D, this.stateTextures[this.currentBuffer]);
+        this.gl.uniform1i(this.gl.getUniformLocation(this.compositingProgram, 'u_state'), 0);
 
         this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
     }
@@ -792,9 +729,10 @@ class ReactionDiffusionApp {
 
 // Start the app when page loads
 window.addEventListener('load', () => {
-    console.log('🚀 Page loaded, initializing CMY Reaction Diffusion...');
+    console.log('🚀 Page loaded, initializing Greyscale Reaction Diffusion...');
     console.log('💡 Check the controls panel on the top-left of the screen');
     console.log('📱 Select your input source from the dropdown: Camera, Video File, or Image File');
+    console.log('🎨 Patterns form in darker areas of the input');
     try {
         new ReactionDiffusionApp();
         console.log('✅ App initialized successfully!');
