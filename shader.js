@@ -176,6 +176,8 @@ class ReactionDiffusionApp {
         this.resolution = 512; // Fixed resolution for simulation
         this.video = null;
         this.videoTexture = null;
+        this.inputSource = 'camera'; // 'camera', 'video', or 'image'
+        this.mediaElement = null; // Can be video or image element
 
         this.init();
     }
@@ -300,6 +302,7 @@ class ReactionDiffusionApp {
                 };
             });
 
+            this.mediaElement = this.video;
             this.videoTexture = this.createTexture(this.video.videoWidth, this.video.videoHeight);
 
         } catch (err) {
@@ -320,6 +323,78 @@ class ReactionDiffusionApp {
 
             this.showError(errorMsg + '\n\nClick Reset to try again.');
         }
+    }
+
+    async setupVideoFile(file) {
+        try {
+            console.log('Loading video file:', file.name);
+
+            this.video = document.createElement('video');
+            this.video.src = URL.createObjectURL(file);
+            this.video.loop = true;
+            this.video.autoplay = true;
+            this.video.playsInline = true;
+            this.video.muted = true;
+
+            await new Promise((resolve, reject) => {
+                this.video.onloadedmetadata = () => {
+                    this.video.play();
+                    console.log('Video file loaded:', this.video.videoWidth, 'x', this.video.videoHeight);
+                    resolve();
+                };
+                this.video.onerror = () => reject(new Error('Failed to load video file'));
+            });
+
+            this.mediaElement = this.video;
+            this.videoTexture = this.createTexture(this.video.videoWidth, this.video.videoHeight);
+
+        } catch (err) {
+            console.error('Video file error:', err);
+            this.showError('Failed to load video file: ' + err.message);
+        }
+    }
+
+    async setupImageFile(file) {
+        try {
+            console.log('Loading image file:', file.name);
+
+            const img = document.createElement('img');
+            img.src = URL.createObjectURL(file);
+
+            await new Promise((resolve, reject) => {
+                img.onload = () => {
+                    console.log('Image file loaded:', img.width, 'x', img.height);
+                    resolve();
+                };
+                img.onerror = () => reject(new Error('Failed to load image file'));
+            });
+
+            this.mediaElement = img;
+            this.video = null; // Clear video reference
+            this.videoTexture = this.createTexture(img.width, img.height);
+
+        } catch (err) {
+            console.error('Image file error:', err);
+            this.showError('Failed to load image file: ' + err.message);
+        }
+    }
+
+    stopCurrentInput() {
+        // Stop camera stream if active
+        if (this.video && this.video.srcObject) {
+            const stream = this.video.srcObject;
+            const tracks = stream.getTracks();
+            tracks.forEach(track => track.stop());
+            this.video.srcObject = null;
+        }
+
+        // Clear media element
+        if (this.video) {
+            this.video.pause();
+            this.video = null;
+        }
+
+        this.mediaElement = null;
     }
 
     async init() {
@@ -452,10 +527,43 @@ class ReactionDiffusionApp {
             values.cameraInfluence.textContent = this.params.cameraInfluence.toFixed(2);
         });
 
+        // Input source selector
+        const inputSourceSelect = document.getElementById('inputSource');
+        const fileInputGroup = document.getElementById('fileInputGroup');
+        const fileInput = document.getElementById('fileInput');
+
+        inputSourceSelect.addEventListener('change', (e) => {
+            this.inputSource = e.target.value;
+
+            if (this.inputSource === 'camera') {
+                fileInputGroup.style.display = 'none';
+                this.stopCurrentInput();
+                document.getElementById('error').style.display = 'none';
+                this.setupCamera();
+            } else {
+                fileInputGroup.style.display = 'block';
+                fileInput.value = ''; // Clear previous selection
+            }
+        });
+
+        fileInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            this.stopCurrentInput();
+            document.getElementById('error').style.display = 'none';
+
+            if (this.inputSource === 'video') {
+                await this.setupVideoFile(file);
+            } else if (this.inputSource === 'image') {
+                await this.setupImageFile(file);
+            }
+        });
+
         document.getElementById('resetBtn').addEventListener('click', async () => {
             this.resetSimulation();
             // Also retry camera if it failed
-            if (!this.video || !this.video.srcObject) {
+            if (this.inputSource === 'camera' && (!this.video || !this.video.srcObject)) {
                 document.getElementById('error').style.display = 'none';
                 await this.setupCamera();
             }
@@ -481,7 +589,24 @@ class ReactionDiffusionApp {
     }
 
     updateVideoTexture() {
-        if (this.video && this.video.readyState >= this.video.HAVE_CURRENT_DATA) {
+        if (!this.mediaElement) return;
+
+        // For video elements, check if ready
+        if (this.mediaElement.tagName === 'VIDEO') {
+            if (this.mediaElement.readyState >= this.mediaElement.HAVE_CURRENT_DATA) {
+                this.gl.bindTexture(this.gl.TEXTURE_2D, this.videoTexture);
+                this.gl.texImage2D(
+                    this.gl.TEXTURE_2D,
+                    0,
+                    this.gl.RGBA,
+                    this.gl.RGBA,
+                    this.gl.UNSIGNED_BYTE,
+                    this.mediaElement
+                );
+            }
+        }
+        // For image elements, update once (will keep updating same image)
+        else if (this.mediaElement.tagName === 'IMG' && this.mediaElement.complete) {
             this.gl.bindTexture(this.gl.TEXTURE_2D, this.videoTexture);
             this.gl.texImage2D(
                 this.gl.TEXTURE_2D,
@@ -489,7 +614,7 @@ class ReactionDiffusionApp {
                 this.gl.RGBA,
                 this.gl.RGBA,
                 this.gl.UNSIGNED_BYTE,
-                this.video
+                this.mediaElement
             );
         }
     }
