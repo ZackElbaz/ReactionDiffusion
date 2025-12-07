@@ -7,9 +7,14 @@ if (!gl) {
     throw new Error('WebGL not supported');
 }
 
-// Set canvas to fill window
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
+// Set canvas display size to fill window
+canvas.style.width = '100vw';
+canvas.style.height = '100vh';
+
+// Use smaller grid for simulation (makes patterns thicker and more dynamic)
+const GRID_SIZE = 512;
+canvas.width = GRID_SIZE;
+canvas.height = GRID_SIZE;
 
 // Simulation parameters - using "Mazes" preset from Karl Sims
 let feed = 0.029;
@@ -358,8 +363,8 @@ function display() {
 
 // Main loop
 function loop() {
-    // Run fewer iterations per frame for thicker patterns
-    for (let i = 0; i < 4; i++) {
+    // Run multiple iterations per frame for continuous evolution
+    for (let i = 0; i < 12; i++) {
         simulate();
     }
 
