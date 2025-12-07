@@ -14,10 +14,9 @@ canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
 // Simulation parameters
-let scale = 1.0;  // Scale controls pattern size (via diffusion rates)
+let scale = 1.0;  // Scale controls pattern size (via grid spacing)
 const feed = 0.05032;
 const kill = 0.06160;
-const dt = 1.0;
 let currentColorMap = 'grayscale';
 let gradientOrientation = 'right-left'; // 'right-left', 'left-right', 'top-bottom', 'bottom-top'
 
@@ -37,15 +36,20 @@ const rdShaderSource = `
     varying vec2 v_texCoord;
     uniform sampler2D u_state;
     uniform vec2 u_resolution;
-    uniform float u_dA;
-    uniform float u_dB;
-    uniform float u_dt;
     uniform float u_feed;
     uniform float u_kill;
+    uniform float u_scale;
     uniform int u_gradientOrientation;
 
     void main() {
-        vec2 pixel = 1.0 / u_resolution;
+        // Scale controls pattern size via effective grid spacing
+        // Larger scale = sample from farther pixels = larger patterns
+        vec2 pixel = u_scale / u_resolution;
+
+        // Fixed diffusion rates (Karl Sims standard)
+        float dA = 1.0;
+        float dB = 0.5;
+        float dt = 1.0;
 
         // Sample current state
         vec2 state = texture2D(u_state, v_texCoord).rg;
@@ -93,12 +97,12 @@ const rdShaderSource = `
 
         // Gray-Scott equations
         float abb = a * b * b;
-        float da = u_dA * laplacian.r - abb + f * (1.0 - a);
-        float db = u_dB * laplacian.g + abb - (k + f) * b;
+        float da = dA * laplacian.r - abb + f * (1.0 - a);
+        float db = dB * laplacian.g + abb - (k + f) * b;
 
         // Update state
-        a += da * u_dt;
-        b += db * u_dt;
+        a += da * dt;
+        b += db * dt;
 
         // Clamp
         a = clamp(a, 0.0, 1.0);
@@ -329,11 +333,9 @@ function simulate() {
     gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
     gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
 
-    // Set uniforms (scale controls diffusion rates)
+    // Set uniforms (scale controls grid spacing, not diffusion rates)
     gl.uniform2f(gl.getUniformLocation(rdProgram, 'u_resolution'), width, height);
-    gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_dA'), 1.0 * scale);
-    gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_dB'), 0.5 * scale);
-    gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_dt'), dt);
+    gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_scale'), scale);
     gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_feed'), feed);
     gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_kill'), kill);
 
