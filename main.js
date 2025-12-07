@@ -19,77 +19,77 @@ let kill = 0.06;   // k: 0.01413 - 0.06534 (X axis)
 let currentColorMap = 'grayscale';
 let gradientOrientation = 'right-left'; // 'right-left', 'left-right', 'top-bottom', 'bottom-top'
 
-// Vertex shader (simple passthrough)
+// Vertex shader - precomputes neighbor UVs for efficiency
 const vertexShaderSource = `
     attribute vec2 a_position;
     varying vec2 v_texCoord;
+    varying vec2 v_uvs[5];  // center, top, right, bottom, left
+    uniform vec2 u_resolution;
+
     void main() {
         v_texCoord = a_position * 0.5 + 0.5;
+
+        // Precompute neighbor UV coordinates (5-point stencil)
+        vec2 pixel = 1.0 / u_resolution;
+        v_uvs[0] = v_texCoord;                      // center
+        v_uvs[1] = v_texCoord + vec2(0.0, pixel.y); // top
+        v_uvs[2] = v_texCoord + vec2(pixel.x, 0.0); // right
+        v_uvs[3] = v_texCoord - vec2(0.0, pixel.y); // bottom
+        v_uvs[4] = v_texCoord - vec2(pixel.x, 0.0); // left
+
         gl_Position = vec4(a_position, 0.0, 1.0);
     }
 `;
 
-// Reaction-Diffusion shader (Gray-Scott model)
+// Reaction-Diffusion shader (Gray-Scott model - exact playground implementation)
 const rdShaderSource = `
     precision highp float;
     varying vec2 v_texCoord;
+    varying vec2 v_uvs[5];  // precomputed neighbor UVs
     uniform sampler2D u_state;
-    uniform vec2 u_resolution;
     uniform float u_feed;
     uniform float u_kill;
+    uniform float u_dA;
+    uniform float u_dB;
+    uniform float u_timestep;
     uniform int u_gradientOrientation;
 
+    // 5-point stencil Laplacian (from reaction-diffusion-playground)
+    vec2 getLaplacian(vec4 centerTexel) {
+        vec2 laplacian = centerTexel.xy * -4.0;  // center weight
+
+        // Add orthogonal neighbors (each with weight 1.0)
+        laplacian += texture2D(u_state, v_uvs[1]).xy;  // top
+        laplacian += texture2D(u_state, v_uvs[2]).xy;  // right
+        laplacian += texture2D(u_state, v_uvs[3]).xy;  // bottom
+        laplacian += texture2D(u_state, v_uvs[4]).xy;  // left
+
+        return laplacian;
+    }
+
     void main() {
-        // Grid spacing for Laplacian computation
-        vec2 pixel = 1.0 / u_resolution;
+        // Get current A/B concentrations
+        vec4 centerTexel = texture2D(u_state, v_uvs[0]);
+        float A = centerTexel.r;
+        float B = centerTexel.g;
 
-        // Karl Sims standard parameters
-        float dA = 1.0;
-        float dB = 0.5;
-        float dt = 1.0;
-
-        // Sample current state
-        vec2 state = texture2D(u_state, v_texCoord).rg;
-        float a = state.r;
-        float b = state.g;
-
-        // Compute Laplacian using 3x3 convolution
-        // Center: -1, Adjacent: 0.2, Diagonals: 0.05
-        vec2 laplacian = vec2(0.0);
-
-        // Center
-        laplacian += texture2D(u_state, v_texCoord).rg * -1.0;
-
-        // Adjacent (4-neighbors)
-        laplacian += texture2D(u_state, v_texCoord + vec2(-pixel.x, 0.0)).rg * 0.2;
-        laplacian += texture2D(u_state, v_texCoord + vec2(pixel.x, 0.0)).rg * 0.2;
-        laplacian += texture2D(u_state, v_texCoord + vec2(0.0, -pixel.y)).rg * 0.2;
-        laplacian += texture2D(u_state, v_texCoord + vec2(0.0, pixel.y)).rg * 0.2;
-
-        // Diagonals
-        laplacian += texture2D(u_state, v_texCoord + vec2(-pixel.x, -pixel.y)).rg * 0.05;
-        laplacian += texture2D(u_state, v_texCoord + vec2(pixel.x, -pixel.y)).rg * 0.05;
-        laplacian += texture2D(u_state, v_texCoord + vec2(-pixel.x, pixel.y)).rg * 0.05;
-        laplacian += texture2D(u_state, v_texCoord + vec2(pixel.x, pixel.y)).rg * 0.05;
-
-        // Use uniform parameters from user selection (no style map variation for now)
+        // Use uniform parameters
         float f = u_feed;
         float k = u_kill;
 
-        // Gray-Scott equations
-        float abb = a * b * b;
-        float da = dA * laplacian.r - abb + f * (1.0 - a);
-        float db = dB * laplacian.g + abb - (k + f) * b;
+        // Compute Laplacian
+        vec2 laplacian = getLaplacian(centerTexel);
 
-        // Update state
-        a += da * dt;
-        b += db * dt;
+        // Pre-calculate reaction term
+        float reactionTerm = A * B * B;
 
-        // Clamp
-        a = clamp(a, 0.0, 1.0);
-        b = clamp(b, 0.0, 1.0);
-
-        gl_FragColor = vec4(a, b, 0.0, 1.0);
+        // Apply Gray-Scott equations in one step (playground style)
+        gl_FragColor = vec4(
+            A + ((u_dA * laplacian.r - reactionTerm + f * (1.0 - A)) * u_timestep),
+            B + ((u_dB * laplacian.g + reactionTerm - (k + f) * B) * u_timestep),
+            0.0,
+            1.0
+        );
     }
 `;
 
@@ -314,10 +314,17 @@ function simulate() {
     gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
     gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
 
+    // Set vertex shader resolution for neighbor UV calculation
+    const vertPosLoc = gl.getAttribLocation(rdProgram, 'a_position');
+    const vertResLoc = gl.getUniformLocation(rdProgram, 'u_resolution');
+    if (vertResLoc) gl.uniform2f(vertResLoc, width, height);
+
     // Set uniforms
-    gl.uniform2f(gl.getUniformLocation(rdProgram, 'u_resolution'), width, height);
     gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_feed'), feed);
     gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_kill'), kill);
+    gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_dA'), 1.0);
+    gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_dB'), 0.5);
+    gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_timestep'), 1.0);
 
     // Set gradient orientation for style map
     const orientations = { 'right-left': 0, 'left-right': 1, 'top-bottom': 2, 'bottom-top': 3 };
