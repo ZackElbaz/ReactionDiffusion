@@ -71,9 +71,9 @@ const reactionDiffusionShader = `
         float darkness = texture2D(u_cameraData, v_texCoord).r;
 
         // Spatially-varying feed rate based on camera darkness
-        // Dark areas = LOW feed rate = patterns grow
-        // Light areas = HIGH feed rate = patterns suppressed
-        float feedRange = 0.02; // How much feed varies
+        // Dark areas = LOW feed rate = patterns grow and persist
+        // Light areas = HIGH feed rate = patterns are suppressed
+        float feedRange = 0.04; // How much feed varies with darkness
         float localFeed = u_feed + (1.0 - darkness) * feedRange;
 
         // Pure Gray-Scott equations (Karl Sims' math)
@@ -85,28 +85,30 @@ const reactionDiffusionShader = `
         a += da;
         b += db;
 
-        // Clamp to valid range
+        // Clamp to valid range (keep CONTINUOUS values for proper simulation)
         a = clamp(a, 0.0, 1.0);
         b = clamp(b, 0.0, 1.0);
 
-        // Binary threshold for crisp black/white output
-        b = step(0.5, b);
-
+        // Output continuous values (threshold happens in compositing shader)
         gl_FragColor = vec4(a, b, 0.0, 1.0);
     }
 `;
 
-// Compositing shader - outputs greyscale pattern (black on white)
+// Compositing shader - outputs crisp black/white pattern
 const compositingShader = `
     precision highp float;
     varying vec2 v_texCoord;
     uniform sampler2D u_state;
 
     void main() {
-        // Get the B chemical (the visible pattern)
-        float pattern = texture2D(u_state, v_texCoord).g;
+        // Get the B chemical (the visible pattern) - continuous value from simulation
+        float b = texture2D(u_state, v_texCoord).g;
 
-        // Black pattern on white background
+        // Apply binary threshold for crisp black/white output
+        // Values above 0.5 become black (1.0), below become white (0.0)
+        float pattern = step(0.5, b);
+
+        // Invert: pattern=1 (black), pattern=0 (white)
         vec3 rgb = vec3(1.0 - pattern);
 
         gl_FragColor = vec4(rgb, 1.0);
