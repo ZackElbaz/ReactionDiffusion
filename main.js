@@ -14,8 +14,9 @@ canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
 // Simulation parameters
-let feed = 0.05032;  // f: 0.002 - 0.12 (Y axis)
-let kill = 0.06160;  // k: 0.01413 - 0.06534 (X axis)
+// Good starting values for labyrinthine patterns
+let feed = 0.055;  // f: 0.002 - 0.12 (Y axis)
+let kill = 0.062;  // k: 0.01413 - 0.06534 (X axis)
 let currentColorMap = 'grayscale';
 let gradientOrientation = 'right-left'; // 'right-left', 'left-right', 'top-bottom', 'bottom-top'
 
@@ -72,28 +73,28 @@ const rdShaderSource = `
         laplacian += texture2D(u_state, v_texCoord + vec2(-pixel.x, pixel.y)).rg * 0.05;
         laplacian += texture2D(u_state, v_texCoord + vec2(pixel.x, pixel.y)).rg * 0.05;
 
-        // Style map: gradient controls feed rate variation
-        // Dark areas (low gradient value) → low feed → more B → dense patterns
-        // Light areas (high gradient value) → high feed → less B → sparse patterns
+        // Style map: gradient controls feed AND kill rate variation
+        // Creates pattern transitions: labyrinths → spots → holes
         float gradientValue = 0.0;
         if (u_gradientOrientation == 0) {
-            // Right to Left (right=dark=dense, left=light=sparse)
+            // Right to Left
             gradientValue = v_texCoord.x;
         } else if (u_gradientOrientation == 1) {
-            // Left to Right (left=dark=dense, right=light=sparse)
+            // Left to Right
             gradientValue = 1.0 - v_texCoord.x;
         } else if (u_gradientOrientation == 2) {
-            // Top to Bottom (top=dark=dense, bottom=light=sparse)
+            // Top to Bottom
             gradientValue = 1.0 - v_texCoord.y;
         } else {
-            // Bottom to Top (bottom=dark=dense, top=light=sparse)
+            // Bottom to Top
             gradientValue = v_texCoord.y;
         }
 
-        // Vary feed rate based on gradient (larger variation for more dramatic effect)
-        float feedVariation = 0.05;
-        float f = u_feed + gradientValue * feedVariation;
-        float k = u_kill;
+        // Vary both feed and kill rates based on gradient
+        float feedVariation = 0.02;
+        float killVariation = 0.005;
+        float f = u_feed - feedVariation + gradientValue * feedVariation * 2.0;
+        float k = u_kill - killVariation + gradientValue * killVariation * 2.0;
 
         // Gray-Scott equations
         float abb = a * b * b;
@@ -127,8 +128,8 @@ const displayShaderSource = `
         vec3 color;
 
         if (u_colorMap == 0) {
-            // Grayscale
-            color = vec3(1.0 - b);
+            // Grayscale - show B chemical (bright where B is high)
+            color = vec3(b);
         } else if (u_colorMap == 1) {
             // Blue gradient (dark blue to light blue)
             color = vec3(b * 0.3, b * 0.5, 0.5 + b * 0.5);
