@@ -33,25 +33,17 @@
         #menu.closed {
             transform: translateX(-250px);
         }
-        #toggleMenu {
+        .hint {
             position: fixed;
-            left: 0;
-            top: 50%;
-            transform: translateY(-50%);
-            background: rgba(0, 0, 0, 0.85);
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.7);
             color: #fff;
-            border: none;
-            padding: 10px 5px;
-            cursor: pointer;
-            font-size: 20px;
-            z-index: 1001;
-            transition: left 0.3s ease;
-        }
-        #menu.closed ~ #toggleMenu {
-            left: 0;
-        }
-        #menu:not(.closed) ~ #toggleMenu {
-            left: 250px;
+            padding: 10px 20px;
+            border-radius: 4px;
+            font-size: 14px;
+            opacity: 0.8;
         }
         h3 {
             margin: 0 0 20px 0;
@@ -115,17 +107,34 @@
             <label>Color Map:</label>
             <select id="colorMap">
                 <option value="grayscale">Grayscale</option>
-                <option value="blue-red">Blue-Red</option>
+                <option value="blue">Blue</option>
+                <option value="orange-blue">Orange-Blue</option>
                 <option value="green-purple">Green-Purple</option>
+                <option value="cyan-magenta">Cyan-Magenta</option>
                 <option value="rainbow">Rainbow</option>
-                <option value="yellow-cyan">Yellow-Cyan</option>
+                <option value="yellow-blue">Yellow-Blue</option>
+                <option value="red-yellow">Red-Yellow</option>
+                <option value="teal-orange">Teal-Orange</option>
+                <option value="purple-yellow">Purple-Yellow</option>
+                <option value="fire">Fire</option>
+                <option value="vibrant">Vibrant</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <label>Gradient Orientation:</label>
+            <select id="orientation">
+                <option value="right-left">Right to Left</option>
+                <option value="left-right">Left to Right</option>
+                <option value="top-bottom">Top to Bottom</option>
+                <option value="bottom-top">Bottom to Top</option>
             </select>
         </div>
 
         <button id="resetBtn">Reset</button>
     </div>
 
-    <button id="toggleMenu">◀</button>
+    <div class="hint">Press 'M' to toggle menu</div>
 
     <script src="main.js"></script>
 </body>

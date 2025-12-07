@@ -19,6 +19,7 @@ const feed = 0.05032;
 const kill = 0.06160;
 const dt = 1.0;
 let currentColorMap = 'grayscale';
+let gradientOrientation = 'right-left'; // 'right-left', 'left-right', 'top-bottom', 'bottom-top'
 
 // Vertex shader (simple passthrough)
 const vertexShaderSource = `
@@ -41,6 +42,7 @@ const rdShaderSource = `
     uniform float u_dt;
     uniform float u_feed;
     uniform float u_kill;
+    uniform int u_gradientOrientation;
 
     void main() {
         vec2 pixel = 1.0 / u_resolution;
@@ -69,11 +71,24 @@ const rdShaderSource = `
         laplacian += texture2D(u_state, v_texCoord + vec2(-pixel.x, pixel.y)).rg * 0.05;
         laplacian += texture2D(u_state, v_texCoord + vec2(pixel.x, pixel.y)).rg * 0.05;
 
-        // Style map: gradient from dark (right) to light (left)
-        // Right side (x=1): dark = low feed
-        // Left side (x=0): light = high feed
+        // Style map: gradient orientation
+        float gradientValue = 0.0;
+        if (u_gradientOrientation == 0) {
+            // Right to Left (right=dark=low, left=light=high)
+            gradientValue = v_texCoord.x;
+        } else if (u_gradientOrientation == 1) {
+            // Left to Right (left=dark=low, right=light=high)
+            gradientValue = 1.0 - v_texCoord.x;
+        } else if (u_gradientOrientation == 2) {
+            // Top to Bottom (top=dark=low, bottom=light=high)
+            gradientValue = 1.0 - v_texCoord.y;
+        } else {
+            // Bottom to Top (bottom=dark=low, top=light=high)
+            gradientValue = v_texCoord.y;
+        }
+
         float feedVariation = 0.03;
-        float f = u_feed + v_texCoord.x * feedVariation;
+        float f = u_feed + gradientValue * feedVariation;
         float k = u_kill;
 
         // Gray-Scott equations
@@ -93,7 +108,7 @@ const rdShaderSource = `
     }
 `;
 
-// Display shader with color maps
+// Display shader with color maps (matching Karl Sims' style)
 const displayShaderSource = `
     precision highp float;
     varying vec2 v_texCoord;
@@ -108,26 +123,62 @@ const displayShaderSource = `
         vec3 color;
 
         if (u_colorMap == 0) {
-            // Grayscale: A=white, B=black
+            // Grayscale
             color = vec3(1.0 - b);
         } else if (u_colorMap == 1) {
-            // Blue-Red: A=blue, B=red
-            color = vec3(b, 0.0, a);
+            // Blue gradient (dark blue to light blue)
+            color = vec3(b * 0.3, b * 0.5, 0.5 + b * 0.5);
         } else if (u_colorMap == 2) {
-            // Green-Purple: A=green, B=purple
-            color = vec3(b * 0.5, a, b);
+            // Orange-Blue
+            color = mix(vec3(0.0, 0.3, 0.6), vec3(1.0, 0.5, 0.0), b);
         } else if (u_colorMap == 3) {
-            // Rainbow: blend through spectrum based on B
-            float hue = b * 5.0;
-            color = vec3(
+            // Green-Purple
+            color = mix(vec3(0.0, 0.5, 0.0), vec3(0.5, 0.0, 0.5), b);
+        } else if (u_colorMap == 4) {
+            // Cyan-Magenta
+            color = mix(vec3(0.0, 0.8, 0.8), vec3(0.8, 0.0, 0.8), b);
+        } else if (u_colorMap == 5) {
+            // Rainbow spectrum
+            float hue = b * 6.0;
+            vec3 c = vec3(
                 abs(hue - 3.0) - 1.0,
                 2.0 - abs(hue - 2.0),
                 2.0 - abs(hue - 4.0)
             );
-            color = clamp(color, 0.0, 1.0);
+            color = clamp(c, 0.0, 1.0);
+        } else if (u_colorMap == 6) {
+            // Yellow-Blue
+            color = mix(vec3(0.0, 0.0, 0.6), vec3(1.0, 1.0, 0.0), b);
+        } else if (u_colorMap == 7) {
+            // Red-Yellow
+            color = mix(vec3(0.5, 0.0, 0.0), vec3(1.0, 1.0, 0.0), b);
+        } else if (u_colorMap == 8) {
+            // Teal-Orange
+            color = mix(vec3(0.0, 0.5, 0.5), vec3(1.0, 0.4, 0.0), b);
+        } else if (u_colorMap == 9) {
+            // Purple-Yellow
+            color = mix(vec3(0.3, 0.0, 0.5), vec3(1.0, 1.0, 0.3), b);
+        } else if (u_colorMap == 10) {
+            // Fire (black-red-orange-yellow)
+            if (b < 0.33) {
+                color = mix(vec3(0.0, 0.0, 0.0), vec3(0.8, 0.0, 0.0), b * 3.0);
+            } else if (b < 0.66) {
+                color = mix(vec3(0.8, 0.0, 0.0), vec3(1.0, 0.5, 0.0), (b - 0.33) * 3.0);
+            } else {
+                color = mix(vec3(1.0, 0.5, 0.0), vec3(1.0, 1.0, 0.5), (b - 0.66) * 3.0);
+            }
         } else {
-            // Yellow-Cyan
-            color = vec3(a, 1.0, b);
+            // Vibrant multi-color
+            float t = b * 4.0;
+            if (t < 1.0) {
+                color = mix(vec3(0.0, 0.0, 1.0), vec3(0.0, 1.0, 1.0), t);
+            } else if (t < 2.0) {
+                color = mix(vec3(0.0, 1.0, 1.0), vec3(0.0, 1.0, 0.0), t - 1.0);
+            } else if (t < 3.0) {
+                color = mix(vec3(0.0, 1.0, 0.0), vec3(1.0, 1.0, 0.0), t - 2.0);
+            } else {
+                color = mix(vec3(1.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0), t - 3.0);
+            }
         }
 
         gl_FragColor = vec4(color, 1.0);
@@ -286,6 +337,10 @@ function simulate() {
     gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_feed'), feed);
     gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_kill'), kill);
 
+    // Set gradient orientation
+    const orientations = { 'right-left': 0, 'left-right': 1, 'top-bottom': 2, 'bottom-top': 3 };
+    gl.uniform1i(gl.getUniformLocation(rdProgram, 'u_gradientOrientation'), orientations[gradientOrientation] || 0);
+
     // Bind current state texture
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, textures[current]);
@@ -314,7 +369,11 @@ function display() {
     gl.uniform1i(gl.getUniformLocation(displayProgram, 'u_state'), 0);
 
     // Set color map
-    const colorMaps = { 'grayscale': 0, 'blue-red': 1, 'green-purple': 2, 'rainbow': 3, 'yellow-cyan': 4 };
+    const colorMaps = {
+        'grayscale': 0, 'blue': 1, 'orange-blue': 2, 'green-purple': 3,
+        'cyan-magenta': 4, 'rainbow': 5, 'yellow-blue': 6, 'red-yellow': 7,
+        'teal-orange': 8, 'purple-yellow': 9, 'fire': 10, 'vibrant': 11
+    };
     gl.uniform1i(gl.getUniformLocation(displayProgram, 'u_colorMap'), colorMaps[currentColorMap] || 0);
 
     // Draw
@@ -337,8 +396,8 @@ function setupControls() {
     const scaleSlider = document.getElementById('scale');
     const scaleValue = document.getElementById('scaleValue');
     const colorMapSelect = document.getElementById('colorMap');
+    const orientationSelect = document.getElementById('orientation');
     const resetBtn = document.getElementById('resetBtn');
-    const toggleBtn = document.getElementById('toggleMenu');
     const menu = document.getElementById('menu');
 
     scaleSlider.addEventListener('input', (e) => {
@@ -350,14 +409,23 @@ function setupControls() {
         currentColorMap = e.target.value;
     });
 
+    orientationSelect.addEventListener('change', (e) => {
+        gradientOrientation = e.target.value;
+    });
+
     resetBtn.addEventListener('click', () => {
         initialize();
     });
 
-    toggleBtn.addEventListener('click', () => {
-        menu.classList.toggle('closed');
-        toggleBtn.textContent = menu.classList.contains('closed') ? '▶' : '◀';
+    // Keyboard control - 'm' key toggles menu
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'm' || e.key === 'M') {
+            menu.classList.toggle('closed');
+        }
     });
+
+    // Start with menu closed
+    menu.classList.add('closed');
 }
 
 // Start
