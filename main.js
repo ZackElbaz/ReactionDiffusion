@@ -17,6 +17,7 @@ canvas.height = window.innerHeight;
 let feed = 0.05032;  // f: 0.002 - 0.12 (Y axis)
 let kill = 0.06160;  // k: 0.01413 - 0.06534 (X axis)
 let currentColorMap = 'grayscale';
+let gradientOrientation = 'right-left'; // 'right-left', 'left-right', 'top-bottom', 'bottom-top'
 
 // Vertex shader (simple passthrough)
 const vertexShaderSource = `
@@ -36,6 +37,7 @@ const rdShaderSource = `
     uniform vec2 u_resolution;
     uniform float u_feed;
     uniform float u_kill;
+    uniform int u_gradientOrientation;
 
     void main() {
         // Grid spacing for Laplacian computation
@@ -70,8 +72,27 @@ const rdShaderSource = `
         laplacian += texture2D(u_state, v_texCoord + vec2(-pixel.x, pixel.y)).rg * 0.05;
         laplacian += texture2D(u_state, v_texCoord + vec2(pixel.x, pixel.y)).rg * 0.05;
 
-        // Use uniform feed and kill rates for consistent pattern formation
-        float f = u_feed;
+        // Style map: gradient controls feed rate variation
+        // Dark areas (low gradient value) → low feed → more B → dense patterns
+        // Light areas (high gradient value) → high feed → less B → sparse patterns
+        float gradientValue = 0.0;
+        if (u_gradientOrientation == 0) {
+            // Right to Left (right=dark=dense, left=light=sparse)
+            gradientValue = v_texCoord.x;
+        } else if (u_gradientOrientation == 1) {
+            // Left to Right (left=dark=dense, right=light=sparse)
+            gradientValue = 1.0 - v_texCoord.x;
+        } else if (u_gradientOrientation == 2) {
+            // Top to Bottom (top=dark=dense, bottom=light=sparse)
+            gradientValue = 1.0 - v_texCoord.y;
+        } else {
+            // Bottom to Top (bottom=dark=dense, top=light=sparse)
+            gradientValue = v_texCoord.y;
+        }
+
+        // Vary feed rate based on gradient (larger variation for more dramatic effect)
+        float feedVariation = 0.05;
+        float f = u_feed + gradientValue * feedVariation;
         float k = u_kill;
 
         // Gray-Scott equations
@@ -317,6 +338,10 @@ function simulate() {
     gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_feed'), feed);
     gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_kill'), kill);
 
+    // Set gradient orientation for style map
+    const orientations = { 'right-left': 0, 'left-right': 1, 'top-bottom': 2, 'bottom-top': 3 };
+    gl.uniform1i(gl.getUniformLocation(rdProgram, 'u_gradientOrientation'), orientations[gradientOrientation] || 0);
+
     // Bind current state texture
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, textures[current]);
@@ -370,6 +395,7 @@ function loop() {
 // Setup UI controls
 function setupControls() {
     const colorMapSelect = document.getElementById('colorMap');
+    const orientationSelect = document.getElementById('orientation');
     const resetBtn = document.getElementById('resetBtn');
     const menu = document.getElementById('menu');
     const paramSelector = document.getElementById('paramSelector');
@@ -379,6 +405,10 @@ function setupControls() {
 
     colorMapSelect.addEventListener('change', (e) => {
         currentColorMap = e.target.value;
+    });
+
+    orientationSelect.addEventListener('change', (e) => {
+        gradientOrientation = e.target.value;
     });
 
     resetBtn.addEventListener('click', () => {
