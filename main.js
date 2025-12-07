@@ -73,9 +73,28 @@ const rdShaderSource = `
         laplacian += texture2D(u_state, v_texCoord + vec2(-pixel.x, pixel.y)).rg * 0.05;
         laplacian += texture2D(u_state, v_texCoord + vec2(pixel.x, pixel.y)).rg * 0.05;
 
-        // Use uniform parameters first (no style map variation)
-        float f = u_feed;
-        float k = u_kill;
+        // Style map: gradient varies BOTH feed and kill rates
+        // This creates pattern transitions across the canvas
+        float gradientValue = 0.0;
+        if (u_gradientOrientation == 0) {
+            // Right to Left
+            gradientValue = 1.0 - v_texCoord.x;
+        } else if (u_gradientOrientation == 1) {
+            // Left to Right
+            gradientValue = v_texCoord.x;
+        } else if (u_gradientOrientation == 2) {
+            // Top to Bottom
+            gradientValue = v_texCoord.y;
+        } else {
+            // Bottom to Top
+            gradientValue = 1.0 - v_texCoord.y;
+        }
+
+        // Vary both parameters (like reference implementation)
+        float feedRange = 0.006;
+        float killRange = 0.003;
+        float f = u_feed - feedRange + gradientValue * feedRange * 2.0;
+        float k = u_kill - killRange + gradientValue * killRange * 2.0;
 
         // Gray-Scott equations
         float abb = a * b * b;
