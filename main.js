@@ -14,7 +14,6 @@ canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
 // Simulation parameters
-let scale = 1.0;  // Scale controls pattern size (via time step)
 let feed = 0.05032;  // f: 0.002 - 0.12 (Y axis)
 let kill = 0.06160;  // k: 0.01413 - 0.06534 (X axis)
 let currentColorMap = 'grayscale';
@@ -38,18 +37,16 @@ const rdShaderSource = `
     uniform vec2 u_resolution;
     uniform float u_feed;
     uniform float u_kill;
-    uniform float u_scale;
     uniform int u_gradientOrientation;
 
     void main() {
         // Grid spacing for Laplacian computation
         vec2 pixel = 1.0 / u_resolution;
 
-        // Fixed diffusion rates (Karl Sims standard)
+        // Karl Sims standard parameters
         float dA = 1.0;
         float dB = 0.5;
-        // Scale controls reaction rate relative to diffusion (via dt)
-        float dt = 1.0 * u_scale;
+        float dt = 1.0;
 
         // Sample current state
         vec2 state = texture2D(u_state, v_texCoord).rg;
@@ -333,9 +330,8 @@ function simulate() {
     gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
     gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
 
-    // Set uniforms (scale controls grid spacing, not diffusion rates)
+    // Set uniforms
     gl.uniform2f(gl.getUniformLocation(rdProgram, 'u_resolution'), width, height);
-    gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_scale'), scale);
     gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_feed'), feed);
     gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_kill'), kill);
 
@@ -395,8 +391,6 @@ function loop() {
 
 // Setup UI controls
 function setupControls() {
-    const scaleSlider = document.getElementById('scale');
-    const scaleValue = document.getElementById('scaleValue');
     const colorMapSelect = document.getElementById('colorMap');
     const orientationSelect = document.getElementById('orientation');
     const resetBtn = document.getElementById('resetBtn');
@@ -405,11 +399,6 @@ function setupControls() {
     const paramCrosshair = document.getElementById('paramCrosshair');
     const feedValue = document.getElementById('feedValue');
     const killValue = document.getElementById('killValue');
-
-    scaleSlider.addEventListener('input', (e) => {
-        scale = parseFloat(e.target.value);
-        scaleValue.textContent = scale.toFixed(2);
-    });
 
     colorMapSelect.addEventListener('change', (e) => {
         currentColorMap = e.target.value;
