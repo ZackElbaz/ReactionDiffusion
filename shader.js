@@ -67,27 +67,29 @@ const reactionDiffusionShader = `
         laplacian += texture2D(u_state, v_texCoord + vec2(pixel.x, -pixel.y)).rg * 0.05;
         laplacian += texture2D(u_state, v_texCoord + vec2(-pixel.x, -pixel.y)).rg * 0.05;
 
-        // Get camera darkness (darker = more pattern density)
+        // Get camera darkness (darker = more patterns)
         float darkness = texture2D(u_cameraData, v_texCoord).r;
+
+        // Spatially-varying feed rate based on camera darkness
+        // Dark areas = LOW feed rate = patterns grow
+        // Light areas = HIGH feed rate = patterns suppressed
+        float feedRange = 0.02; // How much feed varies
+        float localFeed = u_feed + (1.0 - darkness) * feedRange;
 
         // Pure Gray-Scott equations (Karl Sims' math)
         float abb = a * b * b;
-        float da = u_diffA * laplacian.r - abb + u_feed * (1.0 - a);
-        float db = u_diffB * laplacian.g + abb - (u_kill + u_feed) * b;
+        float da = u_diffA * laplacian.r - abb + localFeed * (1.0 - a);
+        float db = u_diffB * laplacian.g + abb - (u_kill + localFeed) * b;
 
         // Update state
         a += da;
         b += db;
 
-        // Add camera influence directly to B chemical
-        // Dark areas get more B (more pattern density)
-        b += darkness * 0.15;
-
         // Clamp to valid range
         a = clamp(a, 0.0, 1.0);
         b = clamp(b, 0.0, 1.0);
 
-        // Binary threshold for crisp patterns
+        // Binary threshold for crisp black/white output
         b = step(0.5, b);
 
         gl_FragColor = vec4(a, b, 0.0, 1.0);
@@ -184,20 +186,20 @@ class ReactionDiffusionApp {
     }
 
     updateGrayScottParams() {
-        // Map thickness to diffusion rates
+        // Fixed feed/kill parameters for worm-like patterns
+        this.feed = 0.05303;
+        this.kill = 0.06235;
+
+        // Thickness slider controls diffusion rates (line thickness)
         // Thinner lines = lower diffusion, thicker = higher diffusion
         const thicknessScale = this.params.thickness;
-        this.diffA = 0.8 + thicknessScale * 0.4;  // Range: 0.8 - 1.2
+        this.diffA = 0.8 + thicknessScale * 0.6;  // Range: 0.8 - 1.4
         this.diffB = 0.3 + thicknessScale * 0.4;  // Range: 0.3 - 0.7
 
-        // Use maze/labyrinth parameters for crisp lines
-        this.feed = 0.029;  // Fixed for maze patterns
-        this.kill = 0.057;  // Fixed for maze patterns
-
         // Viscosity controls simulation speed (iterations per frame)
-        // Low viscosity = more iterations = faster movement
-        // High viscosity = fewer iterations = slower movement
-        this.iterationsPerFrame = Math.max(1, Math.floor(1 + (1.0 - this.params.viscosity) * 3));
+        // Low viscosity = more iterations = faster pattern evolution
+        // High viscosity = fewer iterations = slower pattern evolution
+        this.iterationsPerFrame = Math.max(1, Math.floor(1 + (1.0 - this.params.viscosity) * 5));
     }
 
     showError(message) {
