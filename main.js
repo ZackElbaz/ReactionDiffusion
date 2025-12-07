@@ -47,7 +47,7 @@ const rdShaderSource = `
         // Karl Sims standard parameters
         float dA = 1.0;
         float dB = 0.5;
-        float dt = 1.0;
+        float dt = 0.6;  // Smaller time step for stability with multiple iterations
 
         // Sample current state
         vec2 state = texture2D(u_state, v_texCoord).rg;
@@ -73,28 +73,28 @@ const rdShaderSource = `
         laplacian += texture2D(u_state, v_texCoord + vec2(-pixel.x, pixel.y)).rg * 0.05;
         laplacian += texture2D(u_state, v_texCoord + vec2(pixel.x, pixel.y)).rg * 0.05;
 
-        // Style map: gradient controls feed AND kill rate variation
-        // Creates pattern transitions: labyrinths → spots → holes
+        // Style map: gradient controls feed rate variation
+        // Dark areas (low feed) → more B → dense labyrinth patterns
+        // Light areas (high feed) → less B → sparse spots/dots
         float gradientValue = 0.0;
         if (u_gradientOrientation == 0) {
-            // Right to Left
-            gradientValue = v_texCoord.x;
-        } else if (u_gradientOrientation == 1) {
-            // Left to Right
+            // Right to Left (right=dark=dense, left=light=sparse)
             gradientValue = 1.0 - v_texCoord.x;
+        } else if (u_gradientOrientation == 1) {
+            // Left to Right (left=dark=dense, right=light=sparse)
+            gradientValue = v_texCoord.x;
         } else if (u_gradientOrientation == 2) {
-            // Top to Bottom
-            gradientValue = 1.0 - v_texCoord.y;
-        } else {
-            // Bottom to Top
+            // Top to Bottom (top=dark=dense, bottom=light=sparse)
             gradientValue = v_texCoord.y;
+        } else {
+            // Bottom to Top (bottom=dark=dense, top=light=sparse)
+            gradientValue = 1.0 - v_texCoord.y;
         }
 
-        // Vary both feed and kill rates based on gradient
-        float feedVariation = 0.02;
-        float killVariation = 0.005;
+        // Vary feed rate based on gradient (dark=low feed, light=high feed)
+        float feedVariation = 0.015;
         float f = u_feed - feedVariation + gradientValue * feedVariation * 2.0;
-        float k = u_kill - killVariation + gradientValue * killVariation * 2.0;
+        float k = u_kill;
 
         // Gray-Scott equations
         float abb = a * b * b;
@@ -384,8 +384,11 @@ function display() {
 
 // Main loop
 function loop() {
-    // Run simulation step
-    simulate();
+    // Run multiple simulation steps per frame for faster, more stable pattern formation
+    // Karl Sims typically runs 10-20 iterations per display frame
+    for (let i = 0; i < 16; i++) {
+        simulate();
+    }
 
     // Display result
     display();
