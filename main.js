@@ -27,7 +27,7 @@ const vertexShaderSource = `
     }
 `;
 
-// STEP 1: Just display what we have (for testing)
+// Display shader with color maps
 const displayShaderSource = `
     precision highp float;
     varying vec2 v_texCoord;
@@ -39,10 +39,67 @@ const displayShaderSource = `
         float A = state.r;
         float B = state.g;
 
-        // Simple grayscale: show B concentration
-        // B=0 (no pattern) = white
-        // B=1 (full pattern) = black
-        vec3 color = vec3(1.0 - B);
+        vec3 color;
+
+        // Color maps - B concentration mapped to colors
+        if (u_colorMap == 0) {
+            // Grayscale: B=0 white, B=1 black
+            color = vec3(1.0 - B);
+        } else if (u_colorMap == 1) {
+            // Blue
+            color = mix(vec3(1.0), vec3(0.0, 0.0, 1.0), B);
+        } else if (u_colorMap == 2) {
+            // Orange-Blue
+            color = mix(vec3(1.0), vec3(1.0, 0.5, 0.0), B);
+        } else if (u_colorMap == 3) {
+            // Green-Purple
+            color = mix(vec3(1.0), vec3(0.5, 0.0, 0.5), B);
+        } else if (u_colorMap == 4) {
+            // Cyan-Magenta
+            color = mix(vec3(1.0), vec3(1.0, 0.0, 1.0), B);
+        } else if (u_colorMap == 5) {
+            // Rainbow
+            float hue = B * 6.0;
+            vec3 c = vec3(
+                abs(hue - 3.0) - 1.0,
+                2.0 - abs(hue - 2.0),
+                2.0 - abs(hue - 4.0)
+            );
+            color = clamp(c, 0.0, 1.0);
+        } else if (u_colorMap == 6) {
+            // Yellow-Blue
+            color = mix(vec3(1.0), vec3(1.0, 1.0, 0.0), B);
+        } else if (u_colorMap == 7) {
+            // Red-Yellow
+            color = mix(vec3(1.0), vec3(1.0, 0.0, 0.0), B);
+        } else if (u_colorMap == 8) {
+            // Teal-Orange
+            color = mix(vec3(1.0), vec3(0.0, 0.8, 0.8), B);
+        } else if (u_colorMap == 9) {
+            // Purple-Yellow
+            color = mix(vec3(1.0), vec3(0.8, 0.0, 0.8), B);
+        } else if (u_colorMap == 10) {
+            // Fire
+            if (B < 0.33) {
+                color = mix(vec3(1.0), vec3(0.8, 0.0, 0.0), B * 3.0);
+            } else if (B < 0.66) {
+                color = mix(vec3(0.8, 0.0, 0.0), vec3(1.0, 0.5, 0.0), (B - 0.33) * 3.0);
+            } else {
+                color = mix(vec3(1.0, 0.5, 0.0), vec3(1.0, 1.0, 0.5), (B - 0.66) * 3.0);
+            }
+        } else {
+            // Vibrant
+            float t = B * 4.0;
+            if (t < 1.0) {
+                color = mix(vec3(1.0), vec3(0.0, 1.0, 1.0), t);
+            } else if (t < 2.0) {
+                color = mix(vec3(0.0, 1.0, 1.0), vec3(0.0, 1.0, 0.0), t - 1.0);
+            } else if (t < 3.0) {
+                color = mix(vec3(0.0, 1.0, 0.0), vec3(1.0, 1.0, 0.0), t - 2.0);
+            } else {
+                color = mix(vec3(1.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0), t - 3.0);
+            }
+        }
 
         gl_FragColor = vec4(color, 1.0);
     }
@@ -274,7 +331,12 @@ function display() {
     gl.uniform1i(gl.getUniformLocation(displayProgram, 'u_state'), 0);
 
     // Set color map
-    gl.uniform1i(gl.getUniformLocation(displayProgram, 'u_colorMap'), 0);
+    const colorMaps = {
+        'grayscale': 0, 'blue': 1, 'orange-blue': 2, 'green-purple': 3,
+        'cyan-magenta': 4, 'rainbow': 5, 'yellow-blue': 6, 'red-yellow': 7,
+        'teal-orange': 8, 'purple-yellow': 9, 'fire': 10, 'vibrant': 11
+    };
+    gl.uniform1i(gl.getUniformLocation(displayProgram, 'u_colorMap'), colorMaps[currentColorMap] || 0);
 
     // Draw
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -295,12 +357,19 @@ function loop() {
 
 // Setup UI controls
 function setupControls() {
+    const colorMapSelect = document.getElementById('colorMap');
     const resetBtn = document.getElementById('resetBtn');
     const paramSelector = document.getElementById('paramSelector');
     const paramCrosshair = document.getElementById('paramCrosshair');
     const feedValue = document.getElementById('feedValue');
     const killValue = document.getElementById('killValue');
     const menu = document.getElementById('menu');
+
+    // Color map selector
+    colorMapSelect.addEventListener('change', (e) => {
+        currentColorMap = e.target.value;
+        console.log('Color map changed to:', currentColorMap);
+    });
 
     resetBtn.addEventListener('click', () => {
         console.log('Reset button clicked');
