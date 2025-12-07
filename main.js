@@ -1,6 +1,4 @@
-// Karl Sims Reaction-Diffusion Implementation
-// Following: https://www.karlsims.com/rd.html
-
+// Karl Sims Reaction-Diffusion - Starting from scratch
 const canvas = document.getElementById('canvas');
 const gl = canvas.getContext('webgl', { preserveDrawingBuffer: true });
 
@@ -19,92 +17,17 @@ let kill = 0.06;
 let currentColorMap = 'grayscale';
 let gradientOrientation = 'right-left';
 
-// Vertex shader - precomputes neighbor UVs for efficiency
+// Simple vertex shader
 const vertexShaderSource = `
     attribute vec2 a_position;
     varying vec2 v_texCoord;
-    varying vec2 v_uvs[5];  // center, top, right, bottom, left
-    uniform vec2 u_resolution;
-
     void main() {
         v_texCoord = a_position * 0.5 + 0.5;
-
-        // Precompute neighbor UV coordinates (5-point stencil)
-        vec2 pixel = 1.0 / u_resolution;
-        v_uvs[0] = v_texCoord;                      // center
-        v_uvs[1] = v_texCoord + vec2(0.0, pixel.y); // top
-        v_uvs[2] = v_texCoord + vec2(pixel.x, 0.0); // right
-        v_uvs[3] = v_texCoord - vec2(0.0, pixel.y); // bottom
-        v_uvs[4] = v_texCoord - vec2(pixel.x, 0.0); // left
-
         gl_Position = vec4(a_position, 0.0, 1.0);
     }
 `;
 
-// Reaction-Diffusion shader - Pure Gray-Scott equations
-const rdShaderSource = `
-    precision highp float;
-    varying vec2 v_texCoord;
-    varying vec2 v_uvs[5];
-    uniform sampler2D u_state;
-    uniform float u_feed;
-    uniform float u_kill;
-    uniform int u_gradientOrientation;
-
-    // Constants from Gray-Scott model
-    const float Da = 1.0;  // A diffuses faster
-    const float Db = 0.5;  // B diffuses slower
-    const float dt = 1.0;  // Time step
-
-    // 5-point Laplacian: ∇²
-    vec2 laplacian(vec4 center) {
-        vec2 lap = center.xy * -4.0;
-        lap += texture2D(u_state, v_uvs[1]).xy;  // top
-        lap += texture2D(u_state, v_uvs[2]).xy;  // right
-        lap += texture2D(u_state, v_uvs[3]).xy;  // bottom
-        lap += texture2D(u_state, v_uvs[4]).xy;  // left
-        return lap;
-    }
-
-    void main() {
-        vec4 center = texture2D(u_state, v_uvs[0]);
-        float A = center.r;
-        float B = center.g;
-
-        // Style map: vary feed rate based on gradient
-        float gradientValue = 0.0;
-        if (u_gradientOrientation == 0) {
-            gradientValue = 1.0 - v_texCoord.x;  // Right to Left
-        } else if (u_gradientOrientation == 1) {
-            gradientValue = v_texCoord.x;        // Left to Right
-        } else if (u_gradientOrientation == 2) {
-            gradientValue = v_texCoord.y;        // Top to Bottom
-        } else {
-            gradientValue = 1.0 - v_texCoord.y;  // Bottom to Top
-        }
-
-        // Vary feed rate across canvas (dark = low feed, light = high feed)
-        float feedRange = 0.01;
-        float f = u_feed - feedRange + gradientValue * feedRange * 2.0;
-        float k = u_kill;
-
-        // Compute Laplacian (diffusion term)
-        vec2 lap = laplacian(center);
-
-        // Reaction term: A·B²
-        float reaction = A * B * B;
-
-        // Gray-Scott equations:
-        // A′ = A + (Da·∇²A − A·B² + f(1−A))·Δt
-        // B′ = B + (Db·∇²B + A·B² − (k+f)B)·Δt
-        float A_new = A + (Da * lap.r - reaction + f * (1.0 - A)) * dt;
-        float B_new = B + (Db * lap.g + reaction - (k + f) * B) * dt;
-
-        gl_FragColor = vec4(A_new, B_new, 0.0, 1.0);
-    }
-`;
-
-// Display shader - maps B concentration to colors
+// STEP 1: Just display what we have (for testing)
 const displayShaderSource = `
     precision highp float;
     varying vec2 v_texCoord;
@@ -113,75 +36,19 @@ const displayShaderSource = `
 
     void main() {
         vec2 state = texture2D(u_state, v_texCoord).rg;
-        float A = state.r;  // Chemical A concentration (0-1)
-        float B = state.g;  // Chemical B concentration (0-1)
+        float A = state.r;
+        float B = state.g;
 
-        vec3 color;
-
-        if (u_colorMap == 0) {
-            // Grayscale: B=0 is white (no pattern), B=1 is black (pattern)
-            color = vec3(1.0 - B);
-        } else if (u_colorMap == 1) {
-            // Blue gradient
-            color = mix(vec3(1.0, 1.0, 1.0), vec3(0.0, 0.0, 1.0), B);
-        } else if (u_colorMap == 2) {
-            // Orange-Blue
-            color = mix(vec3(1.0, 1.0, 1.0), vec3(1.0, 0.5, 0.0), B);
-        } else if (u_colorMap == 3) {
-            // Green-Purple
-            color = mix(vec3(1.0, 1.0, 1.0), vec3(0.5, 0.0, 0.5), B);
-        } else if (u_colorMap == 4) {
-            // Cyan-Magenta
-            color = mix(vec3(1.0, 1.0, 1.0), vec3(0.8, 0.0, 0.8), B);
-        } else if (u_colorMap == 5) {
-            // Rainbow
-            float hue = B * 6.0;
-            vec3 c = vec3(
-                abs(hue - 3.0) - 1.0,
-                2.0 - abs(hue - 2.0),
-                2.0 - abs(hue - 4.0)
-            );
-            color = clamp(c, 0.0, 1.0);
-        } else if (u_colorMap == 6) {
-            // Yellow-Blue
-            color = mix(vec3(1.0, 1.0, 1.0), vec3(1.0, 1.0, 0.0), B);
-        } else if (u_colorMap == 7) {
-            // Red-Yellow
-            color = mix(vec3(1.0, 1.0, 1.0), vec3(1.0, 0.0, 0.0), B);
-        } else if (u_colorMap == 8) {
-            // Teal-Orange
-            color = mix(vec3(1.0, 1.0, 1.0), vec3(1.0, 0.4, 0.0), B);
-        } else if (u_colorMap == 9) {
-            // Purple-Yellow
-            color = mix(vec3(1.0, 1.0, 1.0), vec3(1.0, 1.0, 0.3), B);
-        } else if (u_colorMap == 10) {
-            // Fire
-            if (B < 0.33) {
-                color = mix(vec3(1.0, 1.0, 1.0), vec3(0.8, 0.0, 0.0), B * 3.0);
-            } else if (B < 0.66) {
-                color = mix(vec3(0.8, 0.0, 0.0), vec3(1.0, 0.5, 0.0), (B - 0.33) * 3.0);
-            } else {
-                color = mix(vec3(1.0, 0.5, 0.0), vec3(1.0, 1.0, 0.5), (B - 0.66) * 3.0);
-            }
-        } else {
-            // Vibrant
-            float t = B * 4.0;
-            if (t < 1.0) {
-                color = mix(vec3(1.0, 1.0, 1.0), vec3(0.0, 1.0, 1.0), t);
-            } else if (t < 2.0) {
-                color = mix(vec3(0.0, 1.0, 1.0), vec3(0.0, 1.0, 0.0), t - 1.0);
-            } else if (t < 3.0) {
-                color = mix(vec3(0.0, 1.0, 0.0), vec3(1.0, 1.0, 0.0), t - 2.0);
-            } else {
-                color = mix(vec3(1.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0), t - 3.0);
-            }
-        }
+        // Simple grayscale: show B concentration
+        // B=0 (no pattern) = white
+        // B=1 (full pattern) = black
+        vec3 color = vec3(1.0 - B);
 
         gl_FragColor = vec4(color, 1.0);
     }
 `;
 
-// Initialize shader - creates random blobs of chemical B
+// STEP 2: Initialize with random blobs
 const initShaderSource = `
     precision highp float;
     varying vec2 v_texCoord;
@@ -192,33 +59,60 @@ const initShaderSource = `
     }
 
     void main() {
-        // Start with A=1 (100% chemical A) everywhere
+        // Start with A=1, B=0 everywhere
         float A = 1.0;
         float B = 0.0;
 
-        // Create random blobs of chemical B
-        // Multiple seed points at different scales for interesting initial patterns
-        float rand1 = random(v_texCoord * 5.0);
-        float rand2 = random(v_texCoord * 10.0);
-        float rand3 = random(v_texCoord * 20.0);
-
-        // Large blobs
-        if (rand1 > 0.98) {
-            B = 1.0;
-            A = 0.0;
-        }
-        // Medium blobs
-        else if (rand2 > 0.99) {
-            B = 1.0;
-            A = 0.0;
-        }
-        // Small seeds
-        else if (rand3 > 0.995) {
+        // Create some random blobs of B
+        float rand = random(v_texCoord * 10.0);
+        if (rand > 0.95) {
             B = 1.0;
             A = 0.0;
         }
 
         gl_FragColor = vec4(A, B, 0.0, 1.0);
+    }
+`;
+
+// STEP 3: Gray-Scott simulation
+const rdShaderSource = `
+    precision highp float;
+    varying vec2 v_texCoord;
+    uniform sampler2D u_state;
+    uniform vec2 u_resolution;
+    uniform float u_feed;
+    uniform float u_kill;
+
+    void main() {
+        vec2 pixel = 1.0 / u_resolution;
+
+        // Sample current state
+        vec4 center = texture2D(u_state, v_texCoord);
+        float A = center.r;
+        float B = center.g;
+
+        // 5-point Laplacian
+        vec2 lap = center.rg * -4.0;
+        lap += texture2D(u_state, v_texCoord + vec2(0.0, pixel.y)).rg;
+        lap += texture2D(u_state, v_texCoord + vec2(pixel.x, 0.0)).rg;
+        lap += texture2D(u_state, v_texCoord - vec2(0.0, pixel.y)).rg;
+        lap += texture2D(u_state, v_texCoord - vec2(pixel.x, 0.0)).rg;
+
+        // Constants
+        float Da = 1.0;
+        float Db = 0.5;
+        float dt = 1.0;
+        float f = u_feed;
+        float k = u_kill;
+
+        // Reaction term
+        float reaction = A * B * B;
+
+        // Gray-Scott equations
+        float A_new = A + (Da * lap.r - reaction + f * (1.0 - A)) * dt;
+        float B_new = B + (Db * lap.g + reaction - (k + f) * B) * dt;
+
+        gl_FragColor = vec4(A_new, B_new, 0.0, 1.0);
     }
 `;
 
@@ -309,6 +203,7 @@ const quadBuffer = setupQuad();
 
 // Initialize simulation
 function initialize() {
+    console.log('Initializing...');
     gl.viewport(0, 0, width, height);
     gl.useProgram(initProgram);
 
@@ -327,6 +222,8 @@ function initialize() {
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.pong);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    console.log('Initialization complete');
 }
 
 // Run one simulation step
@@ -343,12 +240,9 @@ function simulate() {
     gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
 
     // Set uniforms
+    gl.uniform2f(gl.getUniformLocation(rdProgram, 'u_resolution'), width, height);
     gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_feed'), feed);
     gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_kill'), kill);
-
-    // Set gradient orientation for style map
-    const orientations = { 'right-left': 0, 'left-right': 1, 'top-bottom': 2, 'bottom-top': 3 };
-    gl.uniform1i(gl.getUniformLocation(rdProgram, 'u_gradientOrientation'), orientations[gradientOrientation] || 0);
 
     // Bind current state texture
     gl.activeTexture(gl.TEXTURE0);
@@ -378,26 +272,15 @@ function display() {
     gl.uniform1i(gl.getUniformLocation(displayProgram, 'u_state'), 0);
 
     // Set color map
-    const colorMaps = {
-        'grayscale': 0, 'blue': 1, 'orange-blue': 2, 'green-purple': 3,
-        'cyan-magenta': 4, 'rainbow': 5, 'yellow-blue': 6, 'red-yellow': 7,
-        'teal-orange': 8, 'purple-yellow': 9, 'fire': 10, 'vibrant': 11
-    };
-    gl.uniform1i(gl.getUniformLocation(displayProgram, 'u_colorMap'), colorMaps[currentColorMap] || 0);
+    gl.uniform1i(gl.getUniformLocation(displayProgram, 'u_colorMap'), 0);
 
     // Draw
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
 
 // Main loop
-let lastTime = 0;
-function loop(time) {
-    // Calculate delta time (like the reference implementation)
-    let dt = (time - lastTime) / 20.0;
-    if (dt > 0.8 || dt <= 0) dt = 0.8;
-    lastTime = time;
-
-    // Run 8 simulation steps per frame (matching reference)
+function loop() {
+    // Run 8 simulation steps per frame
     for (let i = 0; i < 8; i++) {
         simulate();
     }
@@ -410,24 +293,15 @@ function loop(time) {
 
 // Setup UI controls
 function setupControls() {
-    const colorMapSelect = document.getElementById('colorMap');
-    const orientationSelect = document.getElementById('orientation');
     const resetBtn = document.getElementById('resetBtn');
-    const menu = document.getElementById('menu');
     const paramSelector = document.getElementById('paramSelector');
     const paramCrosshair = document.getElementById('paramCrosshair');
     const feedValue = document.getElementById('feedValue');
     const killValue = document.getElementById('killValue');
-
-    colorMapSelect.addEventListener('change', (e) => {
-        currentColorMap = e.target.value;
-    });
-
-    orientationSelect.addEventListener('change', (e) => {
-        gradientOrientation = e.target.value;
-    });
+    const menu = document.getElementById('menu');
 
     resetBtn.addEventListener('click', () => {
+        console.log('Reset button clicked');
         initialize();
     });
 
@@ -469,7 +343,7 @@ function setupControls() {
         isDragging = false;
     });
 
-    // Initialize crosshair position based on current parameters
+    // Initialize crosshair position
     const initialX = (kill - 0.01413) / (0.06534 - 0.01413);
     const initialY = 1.0 - (feed - 0.002) / (0.12 - 0.002);
     paramCrosshair.style.left = (initialX * 100) + '%';
@@ -487,7 +361,7 @@ function setupControls() {
 }
 
 // Start
-console.log('Karl Sims Reaction-Diffusion');
+console.log('Starting Gray-Scott simulation');
 console.log('feed =', feed, ', kill =', kill);
 
 setupControls();
