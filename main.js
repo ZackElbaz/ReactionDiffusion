@@ -13,10 +13,12 @@ if (!gl) {
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
-// Karl Sims' standard parameters
-const DA = 1.0;  // Diffusion rate for chemical A
-const DB = 0.5;  // Diffusion rate for chemical B
-const dt = 1.0;  // Time step
+// Simulation parameters
+let scale = 1.0;  // Scale controls pattern size (via diffusion rates)
+const feed = 0.05032;
+const kill = 0.06160;
+const dt = 1.0;
+let currentColorMap = 'grayscale';
 
 // Vertex shader (simple passthrough)
 const vertexShaderSource = `
@@ -91,19 +93,42 @@ const rdShaderSource = `
     }
 `;
 
-// Display shader (A=white, B=black)
+// Display shader with color maps
 const displayShaderSource = `
     precision highp float;
     varying vec2 v_texCoord;
     uniform sampler2D u_state;
+    uniform int u_colorMap;
 
     void main() {
         vec2 state = texture2D(u_state, v_texCoord).rg;
         float a = state.r;
         float b = state.g;
 
-        // A is white, B is black
-        vec3 color = vec3(1.0 - b);
+        vec3 color;
+
+        if (u_colorMap == 0) {
+            // Grayscale: A=white, B=black
+            color = vec3(1.0 - b);
+        } else if (u_colorMap == 1) {
+            // Blue-Red: A=blue, B=red
+            color = vec3(b, 0.0, a);
+        } else if (u_colorMap == 2) {
+            // Green-Purple: A=green, B=purple
+            color = vec3(b * 0.5, a, b);
+        } else if (u_colorMap == 3) {
+            // Rainbow: blend through spectrum based on B
+            float hue = b * 5.0;
+            color = vec3(
+                abs(hue - 3.0) - 1.0,
+                2.0 - abs(hue - 2.0),
+                2.0 - abs(hue - 4.0)
+            );
+            color = clamp(color, 0.0, 1.0);
+        } else {
+            // Yellow-Cyan
+            color = vec3(a, 1.0, b);
+        }
 
         gl_FragColor = vec4(color, 1.0);
     }
@@ -113,9 +138,10 @@ const displayShaderSource = `
 const initShaderSource = `
     precision highp float;
     varying vec2 v_texCoord;
+    uniform float u_seed;
 
     float random(vec2 st) {
-        return fract(sin(dot(st, vec2(12.9898, 78.233))) * 43758.5453);
+        return fract(sin(dot(st, vec2(12.9898, 78.233))) * 43758.5453 * u_seed);
     }
 
     void main() {
@@ -227,6 +253,10 @@ function initialize() {
     gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
     gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
 
+    // Random seed for different initialization each time
+    const randomSeed = Math.random() * 1000.0 + 1.0;
+    gl.uniform1f(gl.getUniformLocation(initProgram, 'u_seed'), randomSeed);
+
     // Initialize both buffers
     gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.ping);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -248,13 +278,13 @@ function simulate() {
     gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
     gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
 
-    // Set uniforms
+    // Set uniforms (scale controls diffusion rates)
     gl.uniform2f(gl.getUniformLocation(rdProgram, 'u_resolution'), width, height);
-    gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_dA'), DA);
-    gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_dB'), DB);
+    gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_dA'), 1.0 * scale);
+    gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_dB'), 0.5 * scale);
     gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_dt'), dt);
-    gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_feed'), 0.055);
-    gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_kill'), 0.062);
+    gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_feed'), feed);
+    gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_kill'), kill);
 
     // Bind current state texture
     gl.activeTexture(gl.TEXTURE0);
@@ -283,6 +313,10 @@ function display() {
     gl.bindTexture(gl.TEXTURE_2D, textures[current]);
     gl.uniform1i(gl.getUniformLocation(displayProgram, 'u_state'), 0);
 
+    // Set color map
+    const colorMaps = { 'grayscale': 0, 'blue-red': 1, 'green-purple': 2, 'rainbow': 3, 'yellow-cyan': 4 };
+    gl.uniform1i(gl.getUniformLocation(displayProgram, 'u_colorMap'), colorMaps[currentColorMap] || 0);
+
     // Draw
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
@@ -298,11 +332,39 @@ function loop() {
     requestAnimationFrame(loop);
 }
 
+// Setup UI controls
+function setupControls() {
+    const scaleSlider = document.getElementById('scale');
+    const scaleValue = document.getElementById('scaleValue');
+    const colorMapSelect = document.getElementById('colorMap');
+    const resetBtn = document.getElementById('resetBtn');
+    const toggleBtn = document.getElementById('toggleMenu');
+    const menu = document.getElementById('menu');
+
+    scaleSlider.addEventListener('input', (e) => {
+        scale = parseFloat(e.target.value);
+        scaleValue.textContent = scale.toFixed(2);
+    });
+
+    colorMapSelect.addEventListener('change', (e) => {
+        currentColorMap = e.target.value;
+    });
+
+    resetBtn.addEventListener('click', () => {
+        initialize();
+    });
+
+    toggleBtn.addEventListener('click', () => {
+        menu.classList.toggle('closed');
+        toggleBtn.textContent = menu.classList.contains('closed') ? '▶' : '◀';
+    });
+}
+
 // Start
 console.log('Karl Sims Reaction-Diffusion');
-console.log('DA =', DA, ', DB =', DB);
-console.log('feed = 0.055, kill = 0.062');
+console.log('feed =', feed, ', kill =', kill);
 console.log('Style map: gradient from dark (right) to light (left)');
 
+setupControls();
 initialize();
 loop();

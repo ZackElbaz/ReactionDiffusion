@@ -10,16 +10,123 @@
             padding: 0;
             overflow: hidden;
             background: #000;
+            font-family: Arial, sans-serif;
         }
         canvas {
             display: block;
             width: 100vw;
             height: 100vh;
         }
+        #menu {
+            position: fixed;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 250px;
+            background: rgba(0, 0, 0, 0.85);
+            color: #fff;
+            padding: 20px;
+            box-sizing: border-box;
+            transition: transform 0.3s ease;
+            z-index: 1000;
+        }
+        #menu.closed {
+            transform: translateX(-250px);
+        }
+        #toggleMenu {
+            position: fixed;
+            left: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            background: rgba(0, 0, 0, 0.85);
+            color: #fff;
+            border: none;
+            padding: 10px 5px;
+            cursor: pointer;
+            font-size: 20px;
+            z-index: 1001;
+            transition: left 0.3s ease;
+        }
+        #menu.closed ~ #toggleMenu {
+            left: 0;
+        }
+        #menu:not(.closed) ~ #toggleMenu {
+            left: 250px;
+        }
+        h3 {
+            margin: 0 0 20px 0;
+            font-size: 18px;
+            border-bottom: 2px solid #fff;
+            padding-bottom: 10px;
+        }
+        .control-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 14px;
+        }
+        .value {
+            float: right;
+            color: #0f0;
+        }
+        input[type="range"] {
+            width: 100%;
+            margin: 5px 0;
+        }
+        select {
+            width: 100%;
+            padding: 8px;
+            background: #333;
+            color: #fff;
+            border: 1px solid #555;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        button {
+            width: 100%;
+            padding: 10px;
+            background: #0066cc;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+        button:hover {
+            background: #0052a3;
+        }
     </style>
 </head>
 <body>
     <canvas id="canvas"></canvas>
+
+    <div id="menu">
+        <h3>Controls</h3>
+
+        <div class="control-group">
+            <label>Scale: <span class="value" id="scaleValue">1.00</span></label>
+            <input type="range" id="scale" min="0.5" max="2.0" step="0.01" value="1.0">
+        </div>
+
+        <div class="control-group">
+            <label>Color Map:</label>
+            <select id="colorMap">
+                <option value="grayscale">Grayscale</option>
+                <option value="blue-red">Blue-Red</option>
+                <option value="green-purple">Green-Purple</option>
+                <option value="rainbow">Rainbow</option>
+                <option value="yellow-cyan">Yellow-Cyan</option>
+            </select>
+        </div>
+
+        <button id="resetBtn">Reset</button>
+    </div>
+
+    <button id="toggleMenu">◀</button>
+
     <script src="main.js"></script>
 </body>
 </html>
