@@ -67,23 +67,21 @@ const reactionDiffusionShader = `
         laplacian += texture2D(u_state, v_texCoord + vec2(pixel.x, -pixel.y)).rg * 0.05;
         laplacian += texture2D(u_state, v_texCoord + vec2(-pixel.x, -pixel.y)).rg * 0.05;
 
-        // Get camera darkness (darker = more pattern)
+        // Get camera darkness (darker = more pattern density)
         float darkness = texture2D(u_cameraData, v_texCoord).r;
-
-        // Spatially varying feed/kill rates based on camera darkness
-        // Dark areas = lower kill rate = patterns survive
-        // Light areas = higher kill rate = patterns die
-        float localFeed = u_feed;
-        float localKill = u_kill + (1.0 - darkness) * 0.03;
 
         // Pure Gray-Scott equations (Karl Sims' math)
         float abb = a * b * b;
-        float da = u_diffA * laplacian.r - abb + localFeed * (1.0 - a);
-        float db = u_diffB * laplacian.g + abb - (localKill + localFeed) * b;
+        float da = u_diffA * laplacian.r - abb + u_feed * (1.0 - a);
+        float db = u_diffB * laplacian.g + abb - (u_kill + u_feed) * b;
 
         // Update state
         a += da;
         b += db;
+
+        // Add camera influence directly to B chemical
+        // Dark areas get more B (more pattern density)
+        b += darkness * 0.15;
 
         // Clamp to valid range
         a = clamp(a, 0.0, 1.0);
