@@ -47,7 +47,7 @@ const rdShaderSource = `
         // Karl Sims standard parameters
         float dA = 1.0;
         float dB = 0.5;
-        float dt = 0.6;  // Smaller time step for stability with multiple iterations
+        float dt = 1.0;
 
         // Sample current state
         vec2 state = texture2D(u_state, v_texCoord).rg;
@@ -91,8 +91,8 @@ const rdShaderSource = `
             gradientValue = 1.0 - v_texCoord.y;
         }
 
-        // Vary feed rate based on gradient (dark=low feed, light=high feed)
-        float feedVariation = 0.015;
+        // Vary feed rate based on gradient for pattern transitions
+        float feedVariation = 0.01;
         float f = u_feed - feedVariation + gradientValue * feedVariation * 2.0;
         float k = u_kill;
 
@@ -204,9 +204,9 @@ const initShaderSource = `
         float a = 1.0;
         float b = 0.0;
 
-        // Seed small random area with B=1
+        // Seed with smaller random clusters for proper pattern formation
         float rand = random(v_texCoord * 10.0);
-        if (rand > 0.97) {
+        if (rand > 0.985) {
             b = 1.0;
         }
 
@@ -384,9 +384,8 @@ function display() {
 
 // Main loop
 function loop() {
-    // Run multiple simulation steps per frame for faster, more stable pattern formation
-    // Karl Sims typically runs 10-20 iterations per display frame
-    for (let i = 0; i < 16; i++) {
+    // Run multiple simulation steps per frame for proper pattern formation
+    for (let i = 0; i < 8; i++) {
         simulate();
     }
 
