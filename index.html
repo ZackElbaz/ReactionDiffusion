@@ -126,6 +126,7 @@
         <div class="control-group">
             <label>Color Map:</label>
             <select id="colorMap">
+                <option value="custom">Custom Gradient</option>
                 <option value="grayscale">Grayscale</option>
                 <option value="blue">Blue</option>
                 <option value="orange-blue">Orange-Blue</option>
@@ -139,6 +140,13 @@
                 <option value="fire">Fire</option>
                 <option value="vibrant">Vibrant</option>
             </select>
+        </div>
+
+        <div class="control-group" id="customColorControls">
+            <label>Color 1 (Low B):</label>
+            <input type="color" id="color1" value="#ffffff">
+            <label style="margin-top: 10px;">Color 2 (High B):</label>
+            <input type="color" id="color2" value="#000000">
         </div>
 
         <div class="control-group">

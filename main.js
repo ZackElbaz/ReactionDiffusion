@@ -14,8 +14,12 @@ canvas.height = window.innerHeight;
 // Simulation parameters - using "Mazes" preset from Karl Sims
 let feed = 0.029;
 let kill = 0.057;
-let currentColorMap = 'grayscale';
+let currentColorMap = 'custom';
 let gradientOrientation = 'right-left';
+
+// Custom gradient colors (RGB in 0-1 range)
+let customColor1 = [1.0, 1.0, 1.0]; // White
+let customColor2 = [0.0, 0.0, 0.0]; // Black
 
 // Simple vertex shader
 const vertexShaderSource = `
@@ -33,6 +37,8 @@ const displayShaderSource = `
     varying vec2 v_texCoord;
     uniform sampler2D u_state;
     uniform int u_colorMap;
+    uniform vec3 u_customColor1;
+    uniform vec3 u_customColor2;
 
     void main() {
         vec2 state = texture2D(u_state, v_texCoord).rg;
@@ -42,7 +48,10 @@ const displayShaderSource = `
         vec3 color;
 
         // Color maps - B concentration mapped to colors
-        if (u_colorMap == 0) {
+        if (u_colorMap == -1) {
+            // Custom gradient: mix between two custom colors based on B
+            color = mix(u_customColor1, u_customColor2, B);
+        } else if (u_colorMap == 0) {
             // Grayscale: B=0 white, B=1 black
             color = vec3(1.0 - B);
         } else if (u_colorMap == 1) {
@@ -332,11 +341,16 @@ function display() {
 
     // Set color map
     const colorMaps = {
+        'custom': -1,
         'grayscale': 0, 'blue': 1, 'orange-blue': 2, 'green-purple': 3,
         'cyan-magenta': 4, 'rainbow': 5, 'yellow-blue': 6, 'red-yellow': 7,
         'teal-orange': 8, 'purple-yellow': 9, 'fire': 10, 'vibrant': 11
     };
     gl.uniform1i(gl.getUniformLocation(displayProgram, 'u_colorMap'), colorMaps[currentColorMap] || 0);
+
+    // Set custom colors
+    gl.uniform3f(gl.getUniformLocation(displayProgram, 'u_customColor1'), customColor1[0], customColor1[1], customColor1[2]);
+    gl.uniform3f(gl.getUniformLocation(displayProgram, 'u_customColor2'), customColor2[0], customColor2[1], customColor2[2]);
 
     // Draw
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -355,6 +369,16 @@ function loop() {
     requestAnimationFrame(loop);
 }
 
+// Helper function to convert hex color to RGB 0-1 range
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? [
+        parseInt(result[1], 16) / 255,
+        parseInt(result[2], 16) / 255,
+        parseInt(result[3], 16) / 255
+    ] : [1.0, 1.0, 1.0];
+}
+
 // Setup UI controls
 function setupControls() {
     const colorMapSelect = document.getElementById('colorMap');
@@ -364,11 +388,24 @@ function setupControls() {
     const feedValue = document.getElementById('feedValue');
     const killValue = document.getElementById('killValue');
     const menu = document.getElementById('menu');
+    const color1Picker = document.getElementById('color1');
+    const color2Picker = document.getElementById('color2');
 
     // Color map selector
     colorMapSelect.addEventListener('change', (e) => {
         currentColorMap = e.target.value;
         console.log('Color map changed to:', currentColorMap);
+    });
+
+    // Color pickers
+    color1Picker.addEventListener('input', (e) => {
+        customColor1 = hexToRgb(e.target.value);
+        console.log('Color 1 changed to:', customColor1);
+    });
+
+    color2Picker.addEventListener('input', (e) => {
+        customColor2 = hexToRgb(e.target.value);
+        console.log('Color 2 changed to:', customColor2);
     });
 
     resetBtn.addEventListener('click', () => {
