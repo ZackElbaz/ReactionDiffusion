@@ -70,30 +70,32 @@ const reactionDiffusionShader = `
         // Get camera darkness (darker = more patterns)
         float darkness = texture2D(u_cameraData, v_texCoord).r;
 
-        // Spatially-varying feed AND kill rates based on camera darkness
-        // According to Gray-Scott model (Karl Sims):
-        // - B (black patterns) grows when: LOW feed + LOW kill
-        // - B dies/sparse when: HIGH feed + HIGH kill
+        // Spatially-varying feed rate based on camera darkness
+        // According to Gray-Scott parameter map (Karl Sims):
+        // - Patterns form in a narrow "crescent" zone of f,k space
+        // - Must stay within this zone or patterns won't form
         //
-        // Dark input areas → want dense B patterns → LOW feed, LOW kill
-        // Light input areas → want no B patterns → HIGH feed, HIGH kill
+        // Strategy: vary ONLY feed rate, keep kill fixed
+        // Dark areas: LOW feed → patterns grow and persist
+        // Light areas: HIGH feed → patterns are killed off
 
-        float feedRange = 0.03;  // How much feed varies with brightness
-        float killRange = 0.015; // How much kill varies with brightness
+        float feedRange = 0.025;  // Moderate variation to stay in pattern zone
 
-        // Dark areas: f≈0.05303, k≈0.06235 (base values)
-        // Light areas: f≈0.08303, k≈0.07735 (higher values suppress B)
+        // Dark areas: f≈0.05303 (base - in pattern zone)
+        // Light areas: f≈0.07803 (higher - suppresses patterns but still in zone)
         float localFeed = u_feed + (1.0 - darkness) * feedRange;
-        float localKill = u_kill + (1.0 - darkness) * killRange;
+        float localKill = u_kill; // Keep kill constant for stability
 
         // Pure Gray-Scott equations (Karl Sims' math)
         float abb = a * b * b;
         float da = u_diffA * laplacian.r - abb + localFeed * (1.0 - a);
         float db = u_diffB * laplacian.g + abb - (localKill + localFeed) * b;
 
-        // Update state
-        a += da;
-        b += db;
+        // Update state with time step (dt)
+        // Karl Sims uses dt=1.0, but smaller values can help stability
+        float dt = 1.0;
+        a += da * dt;
+        b += db * dt;
 
         // Clamp to valid range (keep CONTINUOUS values for proper simulation)
         a = clamp(a, 0.0, 1.0);
@@ -205,12 +207,19 @@ class ReactionDiffusionApp {
         this.feed = 0.05303;
         this.kill = 0.06235;
 
-        // Thickness slider controls diffusion rates (line thickness)
+        // Thickness slider controls SCALE (pattern size)
+        // Scale = reaction rate / diffusion rate
+        // High thickness value = high scale = larger, thicker patterns (higher diffusion)
+        // Low thickness value = low scale = smaller, thinner patterns (lower diffusion)
+        //
         // Karl Sims standard values: DA=1.0, DB=0.5
-        // Keeping 2:1 ratio is critical for proper Gray-Scott behavior
-        const thicknessScale = this.params.thickness;
-        this.diffA = 0.8 + thicknessScale * 0.4;   // Range: 0.8 - 1.2 (around 1.0)
-        this.diffB = 0.4 + thicknessScale * 0.2;   // Range: 0.4 - 0.6 (around 0.5)
+        // Maintaining 2:1 ratio is critical for proper Gray-Scott behavior
+        const scale = this.params.thickness;
+
+        // Map scale to diffusion rates
+        // Range: DA 0.6-1.4, DB 0.3-0.7 (keeping 2:1 ratio)
+        this.diffA = 0.6 + scale * 0.8;   // Low scale: smaller patterns, High scale: larger patterns
+        this.diffB = 0.3 + scale * 0.4;   // Always half of diffA
 
         // Viscosity controls simulation speed (iterations per frame)
         // Low viscosity = more iterations = faster pattern evolution
