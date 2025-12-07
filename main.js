@@ -11,9 +11,9 @@ if (!gl) {
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
-// Simulation parameters
-let feed = 0.037;
-let kill = 0.06;
+// Simulation parameters - using "Mazes" preset from Karl Sims
+let feed = 0.029;
+let kill = 0.057;
 let currentColorMap = 'grayscale';
 let gradientOrientation = 'right-left';
 
@@ -63,9 +63,11 @@ const initShaderSource = `
         float A = 1.0;
         float B = 0.0;
 
-        // Create some random blobs of B
-        float rand = random(v_texCoord * 10.0);
-        if (rand > 0.95) {
+        // Create denser random blobs of B for better pattern formation
+        float rand1 = random(v_texCoord * 5.0);
+        float rand2 = random(v_texCoord * 10.0);
+
+        if (rand1 > 0.9 || rand2 > 0.95) {
             B = 1.0;
             A = 0.0;
         }
@@ -280,8 +282,8 @@ function display() {
 
 // Main loop
 function loop() {
-    // Run 8 simulation steps per frame
-    for (let i = 0; i < 8; i++) {
+    // Run fewer iterations per frame for thicker patterns
+    for (let i = 0; i < 4; i++) {
         simulate();
     }
 
