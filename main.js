@@ -14,9 +14,9 @@ canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
 // Simulation parameters
-let scale = 1.0;  // Scale controls pattern size (via grid spacing)
-const feed = 0.05032;
-const kill = 0.06160;
+let scale = 1.0;  // Scale controls pattern size (via time step)
+let feed = 0.05032;  // f: 0.002 - 0.12 (Y axis)
+let kill = 0.06160;  // k: 0.01413 - 0.06534 (X axis)
 let currentColorMap = 'grayscale';
 let gradientOrientation = 'right-left'; // 'right-left', 'left-right', 'top-bottom', 'bottom-top'
 
@@ -42,14 +42,14 @@ const rdShaderSource = `
     uniform int u_gradientOrientation;
 
     void main() {
-        // Scale controls pattern size via effective grid spacing
-        // Larger scale = sample from farther pixels = larger patterns
-        vec2 pixel = u_scale / u_resolution;
+        // Grid spacing for Laplacian computation
+        vec2 pixel = 1.0 / u_resolution;
 
         // Fixed diffusion rates (Karl Sims standard)
         float dA = 1.0;
         float dB = 0.5;
-        float dt = 1.0;
+        // Scale controls reaction rate relative to diffusion (via dt)
+        float dt = 1.0 * u_scale;
 
         // Sample current state
         vec2 state = texture2D(u_state, v_texCoord).rg;
@@ -401,6 +401,10 @@ function setupControls() {
     const orientationSelect = document.getElementById('orientation');
     const resetBtn = document.getElementById('resetBtn');
     const menu = document.getElementById('menu');
+    const paramSelector = document.getElementById('paramSelector');
+    const paramCrosshair = document.getElementById('paramCrosshair');
+    const feedValue = document.getElementById('feedValue');
+    const killValue = document.getElementById('killValue');
 
     scaleSlider.addEventListener('input', (e) => {
         scale = parseFloat(e.target.value);
@@ -418,6 +422,53 @@ function setupControls() {
     resetBtn.addEventListener('click', () => {
         initialize();
     });
+
+    // Parameter selector (X/Y for kill/feed)
+    let isDragging = false;
+
+    function updateParameters(e) {
+        const rect = paramSelector.getBoundingClientRect();
+        const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+
+        // X axis: kill (0.01413 to 0.06534)
+        kill = 0.01413 + x * (0.06534 - 0.01413);
+
+        // Y axis: feed (0.002 to 0.12) - inverted (top = high)
+        feed = 0.12 - y * (0.12 - 0.002);
+
+        // Update display
+        killValue.textContent = kill.toFixed(5);
+        feedValue.textContent = feed.toFixed(5);
+
+        // Update crosshair position
+        paramCrosshair.style.left = (x * 100) + '%';
+        paramCrosshair.style.top = (y * 100) + '%';
+
+        // Reinitialize with new parameters
+        initialize();
+    }
+
+    paramSelector.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        updateParameters(e);
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (isDragging) {
+            updateParameters(e);
+        }
+    });
+
+    document.addEventListener('mouseup', () => {
+        isDragging = false;
+    });
+
+    // Initialize crosshair position based on current parameters
+    const initialX = (kill - 0.01413) / (0.06534 - 0.01413);
+    const initialY = 1.0 - (feed - 0.002) / (0.12 - 0.002);
+    paramCrosshair.style.left = (initialX * 100) + '%';
+    paramCrosshair.style.top = (initialY * 100) + '%';
 
     // Keyboard control - 'm' key toggles menu
     document.addEventListener('keydown', (e) => {

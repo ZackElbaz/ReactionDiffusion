@@ -22,16 +22,17 @@
             left: 0;
             top: 0;
             bottom: 0;
-            width: 250px;
+            width: 280px;
             background: rgba(0, 0, 0, 0.85);
             color: #fff;
             padding: 20px;
             box-sizing: border-box;
             transition: transform 0.3s ease;
             z-index: 1000;
+            overflow-y: auto;
         }
         #menu.closed {
-            transform: translateX(-250px);
+            transform: translateX(-280px);
         }
         .hint {
             position: fixed;
@@ -90,6 +91,30 @@
         button:hover {
             background: #0052a3;
         }
+        #paramSelector {
+            width: 200px;
+            height: 200px;
+            background: linear-gradient(to bottom, #001a33 0%, #4d94ff 100%);
+            border: 2px solid #fff;
+            border-radius: 4px;
+            cursor: crosshair;
+            position: relative;
+            margin: 10px auto;
+        }
+        #paramCrosshair {
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            border: 2px solid #ff0;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+        .param-labels {
+            font-size: 11px;
+            color: #aaa;
+            margin-top: 5px;
+        }
     </style>
 </head>
 <body>
@@ -129,6 +154,21 @@
                 <option value="top-bottom">Top to Bottom</option>
                 <option value="bottom-top">Bottom to Top</option>
             </select>
+        </div>
+
+        <div class="control-group">
+            <label>Feed & Kill Rates:</label>
+            <div id="paramSelector">
+                <div id="paramCrosshair"></div>
+            </div>
+            <div class="param-labels">
+                <div>Feed (f): <span class="value" id="feedValue">0.05032</span></div>
+                <div>Kill (k): <span class="value" id="killValue">0.06160</span></div>
+            </div>
+            <div class="param-labels" style="font-size: 10px; margin-top: 5px;">
+                <div>X: k (0.014 - 0.065)</div>
+                <div>Y: f (0.002 - 0.12)</div>
+            </div>
         </div>
 
         <button id="resetBtn">Reset</button>
