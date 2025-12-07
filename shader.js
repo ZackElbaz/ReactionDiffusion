@@ -72,9 +72,24 @@ const reactionDiffusionShader = `
 
         // Spatially-varying feed rate based on camera darkness
         // Dark areas = LOW feed rate = patterns grow and persist
-        // Light areas = HIGH feed rate = patterns are suppressed
-        float feedRange = 0.04; // How much feed varies with darkness
+        // Light areas = HIGH feed rate = patterns are suppressed/killed
+        float feedRange = 0.08; // Stronger camera influence
         float localFeed = u_feed + (1.0 - darkness) * feedRange;
+
+        // Radial flow (advection) - push patterns outward from center
+        vec2 center = vec2(0.5, 0.5);
+        vec2 toCenter = v_texCoord - center;
+        float dist = length(toCenter);
+        vec2 flowDir = normalize(toCenter);
+        float flowStrength = 0.0003; // Subtle outward flow
+
+        // Sample slightly inward for outward advection effect
+        vec2 advectUV = v_texCoord - flowDir * flowStrength;
+        vec2 advectedState = texture2D(u_state, advectUV).rg;
+
+        // Mix original and advected state
+        a = mix(a, advectedState.r, 0.3);
+        b = mix(b, advectedState.g, 0.3);
 
         // Pure Gray-Scott equations (Karl Sims' math)
         float abb = a * b * b;
@@ -125,11 +140,14 @@ const initShader = `
     }
 
     void main() {
-        float rand = random(v_texCoord * 10.0 + vec2(gl_FragCoord.xy));
+        // Create multiple random seeds for better distribution
+        float rand1 = random(v_texCoord * 100.0 + vec2(0.0, 0.0));
+        float rand2 = random(v_texCoord * 100.0 + vec2(123.456, 789.012));
 
-        // Initialize with mostly A chemical (1.0) and some random B spots
+        // Initialize with mostly A chemical (1.0) and random B spots
         float a = 1.0;
-        float b = rand > 0.95 ? 1.0 : 0.0;
+        // More random B seeds (5% instead of 2%) for better pattern nucleation
+        float b = (rand1 > 0.95 || rand2 > 0.97) ? 1.0 : 0.0;
 
         gl_FragColor = vec4(a, b, 0.0, 1.0);
     }
@@ -193,10 +211,11 @@ class ReactionDiffusionApp {
         this.kill = 0.06235;
 
         // Thickness slider controls diffusion rates (line thickness)
-        // Thinner lines = lower diffusion, thicker = higher diffusion
+        // Use standard Gray-Scott ratio: Da/Db ≈ 2.0
+        // Lower values = crisper, more defined patterns
         const thicknessScale = this.params.thickness;
-        this.diffA = 0.8 + thicknessScale * 0.6;  // Range: 0.8 - 1.4
-        this.diffB = 0.3 + thicknessScale * 0.4;  // Range: 0.3 - 0.7
+        this.diffA = 0.9 + thicknessScale * 0.3;   // Range: 0.9 - 1.2
+        this.diffB = 0.45 + thicknessScale * 0.15; // Range: 0.45 - 0.6 (keeps 2:1 ratio)
 
         // Viscosity controls simulation speed (iterations per frame)
         // Low viscosity = more iterations = faster pattern evolution
