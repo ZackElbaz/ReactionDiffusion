@@ -14,10 +14,10 @@ canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
 // Simulation parameters
-let feed = 0.037;  // f: 0.002 - 0.12 (Y axis) - Solitons/Pulsating solitons
-let kill = 0.06;   // k: 0.01413 - 0.06534 (X axis)
+let feed = 0.037;
+let kill = 0.06;
 let currentColorMap = 'grayscale';
-let gradientOrientation = 'right-left'; // 'right-left', 'left-right', 'top-bottom', 'bottom-top'
+let gradientOrientation = 'right-left';
 
 // Vertex shader - precomputes neighbor UVs for efficiency
 const vertexShaderSource = `
@@ -41,59 +41,70 @@ const vertexShaderSource = `
     }
 `;
 
-// Reaction-Diffusion shader (Gray-Scott model - exact playground implementation)
+// Reaction-Diffusion shader - Pure Gray-Scott equations
 const rdShaderSource = `
     precision highp float;
     varying vec2 v_texCoord;
-    varying vec2 v_uvs[5];  // precomputed neighbor UVs
+    varying vec2 v_uvs[5];
     uniform sampler2D u_state;
     uniform float u_feed;
     uniform float u_kill;
-    uniform float u_dA;
-    uniform float u_dB;
-    uniform float u_timestep;
     uniform int u_gradientOrientation;
 
-    // 5-point stencil Laplacian (from reaction-diffusion-playground)
-    vec2 getLaplacian(vec4 centerTexel) {
-        vec2 laplacian = centerTexel.xy * -4.0;  // center weight
+    // Constants from Gray-Scott model
+    const float Da = 1.0;  // A diffuses faster
+    const float Db = 0.5;  // B diffuses slower
+    const float dt = 1.0;  // Time step
 
-        // Add orthogonal neighbors (each with weight 1.0)
-        laplacian += texture2D(u_state, v_uvs[1]).xy;  // top
-        laplacian += texture2D(u_state, v_uvs[2]).xy;  // right
-        laplacian += texture2D(u_state, v_uvs[3]).xy;  // bottom
-        laplacian += texture2D(u_state, v_uvs[4]).xy;  // left
-
-        return laplacian;
+    // 5-point Laplacian: ∇²
+    vec2 laplacian(vec4 center) {
+        vec2 lap = center.xy * -4.0;
+        lap += texture2D(u_state, v_uvs[1]).xy;  // top
+        lap += texture2D(u_state, v_uvs[2]).xy;  // right
+        lap += texture2D(u_state, v_uvs[3]).xy;  // bottom
+        lap += texture2D(u_state, v_uvs[4]).xy;  // left
+        return lap;
     }
 
     void main() {
-        // Get current A/B concentrations
-        vec4 centerTexel = texture2D(u_state, v_uvs[0]);
-        float A = centerTexel.r;
-        float B = centerTexel.g;
+        vec4 center = texture2D(u_state, v_uvs[0]);
+        float A = center.r;
+        float B = center.g;
 
-        // Use uniform parameters
-        float f = u_feed;
+        // Style map: vary feed rate based on gradient
+        float gradientValue = 0.0;
+        if (u_gradientOrientation == 0) {
+            gradientValue = 1.0 - v_texCoord.x;  // Right to Left
+        } else if (u_gradientOrientation == 1) {
+            gradientValue = v_texCoord.x;        // Left to Right
+        } else if (u_gradientOrientation == 2) {
+            gradientValue = v_texCoord.y;        // Top to Bottom
+        } else {
+            gradientValue = 1.0 - v_texCoord.y;  // Bottom to Top
+        }
+
+        // Vary feed rate across canvas (dark = low feed, light = high feed)
+        float feedRange = 0.01;
+        float f = u_feed - feedRange + gradientValue * feedRange * 2.0;
         float k = u_kill;
 
-        // Compute Laplacian
-        vec2 laplacian = getLaplacian(centerTexel);
+        // Compute Laplacian (diffusion term)
+        vec2 lap = laplacian(center);
 
-        // Pre-calculate reaction term
-        float reactionTerm = A * B * B;
+        // Reaction term: A·B²
+        float reaction = A * B * B;
 
-        // Apply Gray-Scott equations in one step (playground style)
-        gl_FragColor = vec4(
-            A + ((u_dA * laplacian.r - reactionTerm + f * (1.0 - A)) * u_timestep),
-            B + ((u_dB * laplacian.g + reactionTerm - (k + f) * B) * u_timestep),
-            0.0,
-            1.0
-        );
+        // Gray-Scott equations:
+        // A′ = A + (Da·∇²A − A·B² + f(1−A))·Δt
+        // B′ = B + (Db·∇²B + A·B² − (k+f)B)·Δt
+        float A_new = A + (Da * lap.r - reaction + f * (1.0 - A)) * dt;
+        float B_new = B + (Db * lap.g + reaction - (k + f) * B) * dt;
+
+        gl_FragColor = vec4(A_new, B_new, 0.0, 1.0);
     }
 `;
 
-// Display shader with color maps (matching Karl Sims' style)
+// Display shader - maps B concentration to colors
 const displayShaderSource = `
     precision highp float;
     varying vec2 v_texCoord;
@@ -102,29 +113,29 @@ const displayShaderSource = `
 
     void main() {
         vec2 state = texture2D(u_state, v_texCoord).rg;
-        float a = state.r;
-        float b = state.g;
+        float A = state.r;  // Chemical A concentration (0-1)
+        float B = state.g;  // Chemical B concentration (0-1)
 
         vec3 color;
 
         if (u_colorMap == 0) {
-            // Grayscale - B=1 is BLACK, B=0 is WHITE
-            color = vec3(1.0 - b);
+            // Grayscale: B=0 is white (no pattern), B=1 is black (pattern)
+            color = vec3(1.0 - B);
         } else if (u_colorMap == 1) {
-            // Blue gradient (dark blue to light blue)
-            color = vec3(b * 0.3, b * 0.5, 0.5 + b * 0.5);
+            // Blue gradient
+            color = mix(vec3(1.0, 1.0, 1.0), vec3(0.0, 0.0, 1.0), B);
         } else if (u_colorMap == 2) {
             // Orange-Blue
-            color = mix(vec3(0.0, 0.3, 0.6), vec3(1.0, 0.5, 0.0), b);
+            color = mix(vec3(1.0, 1.0, 1.0), vec3(1.0, 0.5, 0.0), B);
         } else if (u_colorMap == 3) {
             // Green-Purple
-            color = mix(vec3(0.0, 0.5, 0.0), vec3(0.5, 0.0, 0.5), b);
+            color = mix(vec3(1.0, 1.0, 1.0), vec3(0.5, 0.0, 0.5), B);
         } else if (u_colorMap == 4) {
             // Cyan-Magenta
-            color = mix(vec3(0.0, 0.8, 0.8), vec3(0.8, 0.0, 0.8), b);
+            color = mix(vec3(1.0, 1.0, 1.0), vec3(0.8, 0.0, 0.8), B);
         } else if (u_colorMap == 5) {
-            // Rainbow spectrum
-            float hue = b * 6.0;
+            // Rainbow
+            float hue = B * 6.0;
             vec3 c = vec3(
                 abs(hue - 3.0) - 1.0,
                 2.0 - abs(hue - 2.0),
@@ -133,30 +144,30 @@ const displayShaderSource = `
             color = clamp(c, 0.0, 1.0);
         } else if (u_colorMap == 6) {
             // Yellow-Blue
-            color = mix(vec3(0.0, 0.0, 0.6), vec3(1.0, 1.0, 0.0), b);
+            color = mix(vec3(1.0, 1.0, 1.0), vec3(1.0, 1.0, 0.0), B);
         } else if (u_colorMap == 7) {
             // Red-Yellow
-            color = mix(vec3(0.5, 0.0, 0.0), vec3(1.0, 1.0, 0.0), b);
+            color = mix(vec3(1.0, 1.0, 1.0), vec3(1.0, 0.0, 0.0), B);
         } else if (u_colorMap == 8) {
             // Teal-Orange
-            color = mix(vec3(0.0, 0.5, 0.5), vec3(1.0, 0.4, 0.0), b);
+            color = mix(vec3(1.0, 1.0, 1.0), vec3(1.0, 0.4, 0.0), B);
         } else if (u_colorMap == 9) {
             // Purple-Yellow
-            color = mix(vec3(0.3, 0.0, 0.5), vec3(1.0, 1.0, 0.3), b);
+            color = mix(vec3(1.0, 1.0, 1.0), vec3(1.0, 1.0, 0.3), B);
         } else if (u_colorMap == 10) {
-            // Fire (black-red-orange-yellow)
-            if (b < 0.33) {
-                color = mix(vec3(0.0, 0.0, 0.0), vec3(0.8, 0.0, 0.0), b * 3.0);
-            } else if (b < 0.66) {
-                color = mix(vec3(0.8, 0.0, 0.0), vec3(1.0, 0.5, 0.0), (b - 0.33) * 3.0);
+            // Fire
+            if (B < 0.33) {
+                color = mix(vec3(1.0, 1.0, 1.0), vec3(0.8, 0.0, 0.0), B * 3.0);
+            } else if (B < 0.66) {
+                color = mix(vec3(0.8, 0.0, 0.0), vec3(1.0, 0.5, 0.0), (B - 0.33) * 3.0);
             } else {
-                color = mix(vec3(1.0, 0.5, 0.0), vec3(1.0, 1.0, 0.5), (b - 0.66) * 3.0);
+                color = mix(vec3(1.0, 0.5, 0.0), vec3(1.0, 1.0, 0.5), (B - 0.66) * 3.0);
             }
         } else {
-            // Vibrant multi-color
-            float t = b * 4.0;
+            // Vibrant
+            float t = B * 4.0;
             if (t < 1.0) {
-                color = mix(vec3(0.0, 0.0, 1.0), vec3(0.0, 1.0, 1.0), t);
+                color = mix(vec3(1.0, 1.0, 1.0), vec3(0.0, 1.0, 1.0), t);
             } else if (t < 2.0) {
                 color = mix(vec3(0.0, 1.0, 1.0), vec3(0.0, 1.0, 0.0), t - 1.0);
             } else if (t < 3.0) {
@@ -170,7 +181,7 @@ const displayShaderSource = `
     }
 `;
 
-// Initialize shader (A=1, B=random seed)
+// Initialize shader - creates random blobs of chemical B
 const initShaderSource = `
     precision highp float;
     varying vec2 v_texCoord;
@@ -181,16 +192,33 @@ const initShaderSource = `
     }
 
     void main() {
-        float a = 1.0;
-        float b = 0.0;
+        // Start with A=1 (100% chemical A) everywhere
+        float A = 1.0;
+        float B = 0.0;
 
-        // Sparse random seeding across entire canvas
-        float rand = random(v_texCoord * 10.0);
-        if (rand > 0.99) {
-            b = 1.0;
+        // Create random blobs of chemical B
+        // Multiple seed points at different scales for interesting initial patterns
+        float rand1 = random(v_texCoord * 5.0);
+        float rand2 = random(v_texCoord * 10.0);
+        float rand3 = random(v_texCoord * 20.0);
+
+        // Large blobs
+        if (rand1 > 0.98) {
+            B = 1.0;
+            A = 0.0;
+        }
+        // Medium blobs
+        else if (rand2 > 0.99) {
+            B = 1.0;
+            A = 0.0;
+        }
+        // Small seeds
+        else if (rand3 > 0.995) {
+            B = 1.0;
+            A = 0.0;
         }
 
-        gl_FragColor = vec4(a, b, 0.0, 1.0);
+        gl_FragColor = vec4(A, B, 0.0, 1.0);
     }
 `;
 
@@ -314,17 +342,9 @@ function simulate() {
     gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
     gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
 
-    // Set vertex shader resolution for neighbor UV calculation
-    const vertPosLoc = gl.getAttribLocation(rdProgram, 'a_position');
-    const vertResLoc = gl.getUniformLocation(rdProgram, 'u_resolution');
-    if (vertResLoc) gl.uniform2f(vertResLoc, width, height);
-
     // Set uniforms
     gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_feed'), feed);
     gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_kill'), kill);
-    gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_dA'), 1.0);
-    gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_dB'), 0.5);
-    gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_timestep'), 1.0);
 
     // Set gradient orientation for style map
     const orientations = { 'right-left': 0, 'left-right': 1, 'top-bottom': 2, 'bottom-top': 3 };
