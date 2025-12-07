@@ -73,27 +73,8 @@ const rdShaderSource = `
         laplacian += texture2D(u_state, v_texCoord + vec2(-pixel.x, pixel.y)).rg * 0.05;
         laplacian += texture2D(u_state, v_texCoord + vec2(pixel.x, pixel.y)).rg * 0.05;
 
-        // Style map: gradient controls feed rate variation
-        // Dark areas (low feed) → more B → dense labyrinth patterns
-        // Light areas (high feed) → less B → sparse spots/dots
-        float gradientValue = 0.0;
-        if (u_gradientOrientation == 0) {
-            // Right to Left (right=dark=dense, left=light=sparse)
-            gradientValue = 1.0 - v_texCoord.x;
-        } else if (u_gradientOrientation == 1) {
-            // Left to Right (left=dark=dense, right=light=sparse)
-            gradientValue = v_texCoord.x;
-        } else if (u_gradientOrientation == 2) {
-            // Top to Bottom (top=dark=dense, bottom=light=sparse)
-            gradientValue = v_texCoord.y;
-        } else {
-            // Bottom to Top (bottom=dark=dense, top=light=sparse)
-            gradientValue = 1.0 - v_texCoord.y;
-        }
-
-        // Vary feed rate based on gradient for pattern transitions
-        float feedVariation = 0.01;
-        float f = u_feed - feedVariation + gradientValue * feedVariation * 2.0;
+        // Use uniform parameters first (no style map variation)
+        float f = u_feed;
         float k = u_kill;
 
         // Gray-Scott equations
@@ -204,9 +185,13 @@ const initShaderSource = `
         float a = 1.0;
         float b = 0.0;
 
-        // Seed with smaller random clusters for proper pattern formation
-        float rand = random(v_texCoord * 10.0);
-        if (rand > 0.985) {
+        // Initialize with random seed pattern
+        // Center region gets denser seeding
+        vec2 center = v_texCoord - 0.5;
+        float dist = length(center);
+
+        float rand = random(v_texCoord * 20.0);
+        if (rand > 0.90 && dist < 0.3) {
             b = 1.0;
         }
 
@@ -383,8 +368,14 @@ function display() {
 }
 
 // Main loop
-function loop() {
-    // Run multiple simulation steps per frame for proper pattern formation
+let lastTime = 0;
+function loop(time) {
+    // Calculate delta time (like the reference implementation)
+    let dt = (time - lastTime) / 20.0;
+    if (dt > 0.8 || dt <= 0) dt = 0.8;
+    lastTime = time;
+
+    // Run 8 simulation steps per frame (matching reference)
     for (let i = 0; i < 8; i++) {
         simulate();
     }
