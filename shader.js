@@ -72,24 +72,10 @@ const reactionDiffusionShader = `
 
         // Spatially-varying feed rate based on camera darkness
         // Dark areas = LOW feed rate = patterns grow and persist
-        // Light areas = HIGH feed rate = patterns are suppressed/killed
-        float feedRange = 0.08; // Stronger camera influence
+        // Light areas = HIGH feed rate = patterns are KILLED OFF
+        // This MUST be strong enough to suppress patterns in light areas
+        float feedRange = 0.035; // Strong variation (close to base feed rate)
         float localFeed = u_feed + (1.0 - darkness) * feedRange;
-
-        // Radial flow (advection) - push patterns outward from center
-        vec2 center = vec2(0.5, 0.5);
-        vec2 toCenter = v_texCoord - center;
-        float dist = length(toCenter);
-        vec2 flowDir = normalize(toCenter);
-        float flowStrength = 0.0003; // Subtle outward flow
-
-        // Sample slightly inward for outward advection effect
-        vec2 advectUV = v_texCoord - flowDir * flowStrength;
-        vec2 advectedState = texture2D(u_state, advectUV).rg;
-
-        // Mix original and advected state
-        a = mix(a, advectedState.r, 0.3);
-        b = mix(b, advectedState.g, 0.3);
 
         // Pure Gray-Scott equations (Karl Sims' math)
         float abb = a * b * b;
@@ -211,11 +197,11 @@ class ReactionDiffusionApp {
         this.kill = 0.06235;
 
         // Thickness slider controls diffusion rates (line thickness)
-        // Use standard Gray-Scott ratio: Da/Db ≈ 2.0
-        // Lower values = crisper, more defined patterns
+        // CRITICAL: Diffusion rates must be LOW to prevent blob-like spreading
+        // Higher values cause blobs, lower values create crisp ripply patterns
         const thicknessScale = this.params.thickness;
-        this.diffA = 0.9 + thicknessScale * 0.3;   // Range: 0.9 - 1.2
-        this.diffB = 0.45 + thicknessScale * 0.15; // Range: 0.45 - 0.6 (keeps 2:1 ratio)
+        this.diffA = 0.2 + thicknessScale * 0.1;   // Range: 0.2 - 0.3
+        this.diffB = 0.1 + thicknessScale * 0.05;  // Range: 0.1 - 0.15 (keeps 2:1 ratio)
 
         // Viscosity controls simulation speed (iterations per frame)
         // Low viscosity = more iterations = faster pattern evolution
