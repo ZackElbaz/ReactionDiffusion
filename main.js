@@ -14,9 +14,8 @@ canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
 // Simulation parameters
-// Good starting values for labyrinthine patterns
-let feed = 0.055;  // f: 0.002 - 0.12 (Y axis)
-let kill = 0.062;  // k: 0.01413 - 0.06534 (X axis)
+let feed = 0.037;  // f: 0.002 - 0.12 (Y axis) - Solitons/Pulsating solitons
+let kill = 0.06;   // k: 0.01413 - 0.06534 (X axis)
 let currentColorMap = 'grayscale';
 let gradientOrientation = 'right-left'; // 'right-left', 'left-right', 'top-bottom', 'bottom-top'
 
@@ -73,28 +72,9 @@ const rdShaderSource = `
         laplacian += texture2D(u_state, v_texCoord + vec2(-pixel.x, pixel.y)).rg * 0.05;
         laplacian += texture2D(u_state, v_texCoord + vec2(pixel.x, pixel.y)).rg * 0.05;
 
-        // Style map: gradient varies BOTH feed and kill rates
-        // This creates pattern transitions across the canvas
-        float gradientValue = 0.0;
-        if (u_gradientOrientation == 0) {
-            // Right to Left
-            gradientValue = 1.0 - v_texCoord.x;
-        } else if (u_gradientOrientation == 1) {
-            // Left to Right
-            gradientValue = v_texCoord.x;
-        } else if (u_gradientOrientation == 2) {
-            // Top to Bottom
-            gradientValue = v_texCoord.y;
-        } else {
-            // Bottom to Top
-            gradientValue = 1.0 - v_texCoord.y;
-        }
-
-        // Vary both parameters (like reference implementation)
-        float feedRange = 0.006;
-        float killRange = 0.003;
-        float f = u_feed - feedRange + gradientValue * feedRange * 2.0;
-        float k = u_kill - killRange + gradientValue * killRange * 2.0;
+        // Use uniform parameters from user selection (no style map variation for now)
+        float f = u_feed;
+        float k = u_kill;
 
         // Gray-Scott equations
         float abb = a * b * b;
@@ -128,8 +108,8 @@ const displayShaderSource = `
         vec3 color;
 
         if (u_colorMap == 0) {
-            // Grayscale - show B chemical (bright where B is high)
-            color = vec3(b);
+            // Grayscale - B=1 is BLACK, B=0 is WHITE
+            color = vec3(1.0 - b);
         } else if (u_colorMap == 1) {
             // Blue gradient (dark blue to light blue)
             color = vec3(b * 0.3, b * 0.5, 0.5 + b * 0.5);
@@ -204,13 +184,9 @@ const initShaderSource = `
         float a = 1.0;
         float b = 0.0;
 
-        // Initialize with random seed pattern
-        // Center region gets denser seeding
-        vec2 center = v_texCoord - 0.5;
-        float dist = length(center);
-
-        float rand = random(v_texCoord * 20.0);
-        if (rand > 0.90 && dist < 0.3) {
+        // Sparse random seeding across entire canvas
+        float rand = random(v_texCoord * 10.0);
+        if (rand > 0.99) {
             b = 1.0;
         }
 
