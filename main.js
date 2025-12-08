@@ -26,6 +26,9 @@ let gradientOrientation = 'right-left';
 let customColor1 = [1.0, 1.0, 1.0]; // White
 let customColor2 = [0.0, 0.0, 0.0]; // Black
 
+// Time counter for perturbations
+let timeCounter = 0.0;
+
 // Simple vertex shader
 const vertexShaderSource = `
     attribute vec2 a_position;
@@ -134,17 +137,24 @@ const initShaderSource = `
         float A = 1.0;
         float B = 0.0;
 
-        // Add a small central square with high B to seed the pattern
-        vec2 center = vec2(0.5, 0.5);
-        float size = 0.1;
+        // Create multiple random seed points scattered across the grid
+        for (int i = 0; i < 8; i++) {
+            vec2 seedPos = vec2(
+                random(vec2(float(i) * 13.7, u_seed * 2.3)),
+                random(vec2(float(i) * 7.1, u_seed * 5.9))
+            );
+            float dist = distance(v_texCoord, seedPos);
 
-        if (abs(v_texCoord.x - center.x) < size && abs(v_texCoord.y - center.y) < size) {
-            B = 1.0;
-            A = 0.0;
+            // Small circular seed regions
+            if (dist < 0.03) {
+                float strength = 1.0 - (dist / 0.03);
+                B = max(B, strength);
+                A = min(A, 1.0 - strength);
+            }
         }
 
-        // Add tiny random noise everywhere to break symmetry
-        float noise = (random(v_texCoord * 100.0) - 0.5) * 0.02;
+        // Add random noise everywhere for variation
+        float noise = (random(v_texCoord * 100.0) - 0.5) * 0.05;
         B = clamp(B + noise, 0.0, 1.0);
 
         gl_FragColor = vec4(A, B, 0.0, 1.0);
@@ -159,6 +169,7 @@ const rdShaderSource = `
     uniform vec2 u_resolution;
     uniform float u_feed;
     uniform float u_kill;
+    uniform float u_time;
 
     void main() {
         vec2 pixel = 1.0 / u_resolution;
@@ -188,6 +199,11 @@ const rdShaderSource = `
         // Gray-Scott equations
         float A_new = A + (Da * lap.r - reaction + f * (1.0 - A)) * dt;
         float B_new = B + (Db * lap.g + reaction - (k + f) * B) * dt;
+
+        // Add tiny random perturbations to prevent complete equilibrium
+        float rand = fract(sin(dot(v_texCoord + u_time, vec2(12.9898, 78.233))) * 43758.5453);
+        float perturbation = (rand - 0.5) * 0.001;
+        B_new += perturbation;
 
         // Clamp values to prevent divergence outside [0,1]
         A_new = clamp(A_new, 0.0, 1.0);
@@ -324,6 +340,7 @@ function simulate() {
     gl.uniform2f(gl.getUniformLocation(rdProgram, 'u_resolution'), width, height);
     gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_feed'), feed);
     gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_kill'), kill);
+    gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_time'), timeCounter);
 
     // Bind current state texture
     gl.activeTexture(gl.TEXTURE0);
@@ -334,6 +351,7 @@ function simulate() {
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
     current = next;
+    timeCounter += 0.01;
 }
 
 // Display to screen
