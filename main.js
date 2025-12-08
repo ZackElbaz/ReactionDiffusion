@@ -7,13 +7,9 @@ if (!gl) {
     throw new Error('WebGL not supported');
 }
 
-// Grid settings
-const GRID_SIZE = 100;
-canvas.width = GRID_SIZE;
-canvas.height = GRID_SIZE;
-canvas.style.width = '100vw';
-canvas.style.height = '100vh';
-canvas.style.imageRendering = 'pixelated'; // Make grid visible
+// Grid settings - FULL RESOLUTION like Karl Sims
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
 
 // Simulation parameters - "worms" preset for classic pattern
 let feed = 0.0367;
@@ -55,51 +51,29 @@ const displayShaderSource = `
         vec2 state = texture2D(u_state, v_texCoord).rg;
         float B = state.g;
 
-        // Amplify B by 5x to see subtle variations (critical for visualization!)
-        float B_amplified = clamp(B * 5.0, 0.0, 1.0);
-
-        // Linear gradient between custom colors based on amplified B concentration
-        vec3 color = mix(u_customColor1, u_customColor2, B_amplified);
+        // Linear gradient between custom colors based on B concentration
+        vec3 color = mix(u_customColor1, u_customColor2, B);
 
         gl_FragColor = vec4(color, 1.0);
     }
 `;
 
-// Initialization shader - multiple corner blobs for FK-map debugging
+// Initialization shader - Karl Sims style (single center patch)
 const initShaderSource = `
     precision highp float;
     varying vec2 v_texCoord;
     uniform vec2 u_clusterPos;
     uniform float u_seed;
 
-    float random(vec2 st) {
-        return fract(sin(dot(st, vec2(12.9898, 78.233))) * 43758.5453 * u_seed);
-    }
-
     void main() {
         // Default: A=1.0, B=0.0 everywhere
         float A = 1.0;
         float B = 0.0;
 
-        // DEBUG MODE: Create 4 seed blobs at corners
-        vec2 centers[4];
-        centers[0] = vec2(0.2, 0.2);
-        centers[1] = vec2(0.8, 0.2);
-        centers[2] = vec2(0.2, 0.8);
-        centers[3] = vec2(0.8, 0.8);
-
-        for (int i = 0; i < 4; i++) {
-            float d = distance(v_texCoord, centers[i]);
-            if (d < 0.03) {
-                B = 0.25;
-                A = 0.75;
-            }
-        }
-
-        // Add tiny random noise across the canvas
-        float rand = random(v_texCoord * 100.0);
-        if (rand > 0.999) {
-            B += 0.1;
+        // Single small square patch in center with B=1.0 (Karl Sims method)
+        if (abs(v_texCoord.x - 0.5) < 0.01 && abs(v_texCoord.y - 0.5) < 0.01) {
+            B = 1.0;
+            A = 0.0;
         }
 
         gl_FragColor = vec4(A, B, 0.0, 1.0);
@@ -143,21 +117,12 @@ const rdShaderSource = `
         // Reaction term: A·B²
         float reaction = A * B * B;
 
-        // DEBUG MODE: Spatial FK-map - compute feed/kill per-pixel
-        float kMin = 0.01413;
-        float kMax = 0.06534;
-        float fMin = 0.002;
-        float fMax = 0.12;
-
-        float k = kMin + v_texCoord.x * (kMax - kMin);
-        float f = fMax - v_texCoord.y * (fMax - fMin);
-
-        // Gray-Scott equations (EXACT from user specification):
+        // Gray-Scott equations (UNIFORM feed/kill across entire domain):
         // A′ = A + (Dₐ∇²A − A·B² + f(1−A)) Δt
         // B′ = B + (Db∇²B + A·B² − (k+f)B) Δt
 
-        float A_new = A + (u_Da * laplacian.r - reaction + f * (1.0 - A)) * u_dt;
-        float B_new = B + (u_Db * laplacian.g + reaction - (k + f) * B) * u_dt;
+        float A_new = A + (u_Da * laplacian.r - reaction + u_feed * (1.0 - A)) * u_dt;
+        float B_new = B + (u_Db * laplacian.g + reaction - (u_kill + u_feed) * B) * u_dt;
 
         // Clamp to [0,1] to prevent numerical issues
         A_new = clamp(A_new, 0.0, 1.0);
@@ -206,9 +171,9 @@ function createTexture() {
     gl.bindTexture(gl.TEXTURE_2D, texture);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, GRID_SIZE, GRID_SIZE, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, canvas.width, canvas.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
     return texture;
 }
 
@@ -255,9 +220,9 @@ let clusterPos = [Math.random(), Math.random()];
 
 // Initialize simulation
 function initialize() {
-    console.log('Initializing with cluster at:', clusterPos);
+    console.log('Initializing Karl Sims RD simulation');
 
-    gl.viewport(0, 0, GRID_SIZE, GRID_SIZE);
+    gl.viewport(0, 0, canvas.width, canvas.height);
     gl.useProgram(initProgram);
 
     const posLoc = gl.getAttribLocation(initProgram, 'a_position');
@@ -289,7 +254,7 @@ function initialize() {
 function step() {
     const next = current === 'ping' ? 'pong' : 'ping';
 
-    gl.viewport(0, 0, GRID_SIZE, GRID_SIZE);
+    gl.viewport(0, 0, canvas.width, canvas.height);
     gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers[next]);
     gl.useProgram(rdProgram);
 
@@ -299,7 +264,7 @@ function step() {
     gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
 
     // Set uniforms
-    gl.uniform2f(gl.getUniformLocation(rdProgram, 'u_resolution'), GRID_SIZE, GRID_SIZE);
+    gl.uniform2f(gl.getUniformLocation(rdProgram, 'u_resolution'), canvas.width, canvas.height);
     gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_feed'), feed);
     gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_kill'), kill);
     gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_Da'), Da);
