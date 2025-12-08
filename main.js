@@ -23,7 +23,8 @@ let customColor2 = [0.0, 0.0, 0.0]; // Black (high B)
 // Gray-Scott constants (standard values for pattern formation)
 const Da = 1.0;     // Diffusion rate for A
 const Db = 0.5;     // Diffusion rate for B (A diffuses 2x faster)
-const dt = 1.0;     // Standard time step
+// const dt = 1.0;     // Standard time step
+const dt = 0.05;
 
 // Animation state
 let isPlaying = false;
@@ -71,7 +72,8 @@ const initShaderSource = `
         float B = 0.0;
 
         // Tiny seed at center (Karl Sims method)
-        if (distance(v_texCoord, vec2(0.5)) < 0.005) {
+        // if (distance(v_texCoord, vec2(0.5)) < 0.005) {
+        if (distance(v_texCoord, vec2(0.5)) < 0.02) {
             B = 1.0;
             A = 0.0;
         }
@@ -118,11 +120,15 @@ const rdShaderSource = `
         float reaction = A * B * B;
 
         // Spatial FK-map: feed/kill vary across screen
-        float kMin = 0.01413;
-        float kMax = 0.06534;
-        float fMin = 0.002;
-        float fMax = 0.12;
-
+        // float kMin = 0.01413;
+        // float kMax = 0.06534;
+        // float fMin = 0.002;
+        // float fMax = 0.12;
+        float kMin = 0.045;
+        float kMax = 0.07;
+        float fMin = 0.01;
+        float fMax = 0.10;
+        
         float k = kMin + v_texCoord.x * (kMax - kMin);
         float f = fMin + v_texCoord.y * (fMax - fMin);
 
