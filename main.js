@@ -25,7 +25,7 @@ let customColor2 = [0.0, 0.0, 0.0]; // Black (high B)
 // Gray-Scott constants (standard values for pattern formation)
 const Da = 1.0;     // Diffusion rate for A
 const Db = 0.5;     // Diffusion rate for B (A diffuses 2x faster)
-const dt = 2.0;     // Standard time step
+const dt = 1.0;     // Standard time step
 
 
 // Animation state
