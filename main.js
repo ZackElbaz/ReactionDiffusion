@@ -27,7 +27,7 @@ let customColor2 = [0.0, 0.0, 0.0]; // Black (high B)
 // Gray-Scott constants (standard values for pattern formation)
 const Da = 1.0;     // Diffusion rate for A
 const Db = 0.5;     // Diffusion rate for B (A diffuses 2x faster)
-const dt = 0.1;     // Small time step for stability with normalized Laplacian
+const dt = 1.0;     // Standard time step
 
 // Animation state
 let isPlaying = false;
@@ -55,8 +55,11 @@ const displayShaderSource = `
         vec2 state = texture2D(u_state, v_texCoord).rg;
         float B = state.g;
 
-        // Linear gradient between custom colors based on B concentration
-        vec3 color = mix(u_customColor1, u_customColor2, B);
+        // Amplify B by 5x to see subtle variations (critical for visualization!)
+        float B_amplified = clamp(B * 5.0, 0.0, 1.0);
+
+        // Linear gradient between custom colors based on amplified B concentration
+        vec3 color = mix(u_customColor1, u_customColor2, B_amplified);
 
         gl_FragColor = vec4(color, 1.0);
     }
@@ -78,20 +81,19 @@ const initShaderSource = `
         float A = 1.0;
         float B = 0.0;
 
-        // Create a central cluster at random position
+        // Create a TINY cluster at random position (critical - not too large!)
         float dist = distance(v_texCoord, u_clusterPos);
 
-        if (dist < 0.1) {
-            // Central high concentration of B
-            B = 1.0;
-            A = 0.0;
+        if (dist < 0.02) {
+            // Small seed with partial B concentration
+            B = 0.25;
+            A = 0.75;
         }
 
-        // Add small random B seeding across the canvas (critical for pattern formation)
+        // Add tiny random noise across the canvas
         float rand = random(v_texCoord * 100.0);
-        if (rand > 0.98) {
-            B = 0.5 + random(v_texCoord * 50.0) * 0.5;
-            A = 1.0 - B;
+        if (rand > 0.999) {
+            B += 0.1;
         }
 
         gl_FragColor = vec4(A, B, 0.0, 1.0);
@@ -118,13 +120,19 @@ const rdShaderSource = `
         float A = center.r;
         float B = center.g;
 
-        // Normalized 5-point Laplacian: ∇²
-        // center: -1.0, each cardinal neighbor: 0.2
+        // Correct 9-point Laplacian: ∇²
+        // center: -1.0, cardinals: 0.2 each, diagonals: 0.05 each
         vec2 laplacian = -1.0 * center.rg;
+        // Cardinals (0.2 each)
         laplacian += 0.2 * texture2D(u_state, v_texCoord + vec2(pixel.x, 0.0)).rg;
         laplacian += 0.2 * texture2D(u_state, v_texCoord - vec2(pixel.x, 0.0)).rg;
         laplacian += 0.2 * texture2D(u_state, v_texCoord + vec2(0.0, pixel.y)).rg;
         laplacian += 0.2 * texture2D(u_state, v_texCoord - vec2(0.0, pixel.y)).rg;
+        // Diagonals (0.05 each)
+        laplacian += 0.05 * texture2D(u_state, v_texCoord + vec2(pixel.x, pixel.y)).rg;
+        laplacian += 0.05 * texture2D(u_state, v_texCoord + vec2(pixel.x, -pixel.y)).rg;
+        laplacian += 0.05 * texture2D(u_state, v_texCoord + vec2(-pixel.x, pixel.y)).rg;
+        laplacian += 0.05 * texture2D(u_state, v_texCoord + vec2(-pixel.x, -pixel.y)).rg;
 
         // Reaction term: A·B²
         float reaction = A * B * B;
@@ -298,8 +306,8 @@ function step() {
 function animate() {
     if (!isPlaying) return;
 
-    // Run multiple iterations per frame (more needed with smaller dt)
-    for (let i = 0; i < 50; i++) {
+    // Run a few iterations per frame (NOT 50 - that overshoots!)
+    for (let i = 0; i < 8; i++) {
         step();
     }
 
