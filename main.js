@@ -70,8 +70,8 @@ const initShaderSource = `
         float A = 1.0;
         float B = 0.0;
 
-        // Single small square patch in center with B=1.0 (Karl Sims method)
-        if (abs(v_texCoord.x - 0.5) < 0.01 && abs(v_texCoord.y - 0.5) < 0.01) {
+        // Tiny seed at center (Karl Sims method)
+        if (distance(v_texCoord, vec2(0.5)) < 0.005) {
             B = 1.0;
             A = 0.0;
         }
@@ -124,7 +124,7 @@ const rdShaderSource = `
         float fMax = 0.12;
 
         float k = kMin + v_texCoord.x * (kMax - kMin);
-        float f = fMax - v_texCoord.y * (fMax - fMin);
+        float f = fMin + v_texCoord.y * (fMax - fMin);
 
         // Gray-Scott equations with spatially-varying f/k:
         // A′ = A + (Dₐ∇²A − A·B² + f(1−A)) Δt
@@ -180,8 +180,8 @@ function createTexture() {
     gl.bindTexture(gl.TEXTURE_2D, texture);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, canvas.width, canvas.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
     return texture;
 }
