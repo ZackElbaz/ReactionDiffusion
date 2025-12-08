@@ -23,7 +23,7 @@ let customColor2 = [0.0, 0.0, 0.0]; // Black (high B)
 // Gray-Scott constants (standard values for pattern formation)
 const Da = 1.0;     // Diffusion rate for A
 const Db = 0.5;     // Diffusion rate for B (A diffuses 2x faster)
-const dt = 1.0;     // Standard time step
+const dt = 0.1;     // Small time step for high-resolution grids
 
 // Animation state
 let isPlaying = false;
@@ -126,12 +126,15 @@ const rdShaderSource = `
         float k = kMin + v_texCoord.x * (kMax - kMin);
         float f = fMin + v_texCoord.y * (fMax - fMin);
 
-        // Gray-Scott equations with spatially-varying f/k:
-        // A′ = A + (Dₐ∇²A − A·B² + f(1−A)) Δt
-        // B′ = B + (Db∇²B + A·B² − (k+f)B) Δt
+        // Scale Laplacian by resolution to prevent over-diffusion at high resolutions
+        float scale = min(u_resolution.x, u_resolution.y);
 
-        float A_new = A + (u_Da * laplacian.r - reaction + f * (1.0 - A)) * u_dt;
-        float B_new = B + (u_Db * laplacian.g + reaction - (k + f) * B) * u_dt;
+        // Gray-Scott equations with spatially-varying f/k and scaled diffusion:
+        // A′ = A + (Dₐ∇²A/scale − A·B² + f(1−A)) Δt
+        // B′ = B + (Db∇²B/scale + A·B² − (k+f)B) Δt
+
+        float A_new = A + (u_Da * laplacian.r / scale - reaction + f * (1.0 - A)) * u_dt;
+        float B_new = B + (u_Db * laplacian.g / scale + reaction - (k + f) * B) * u_dt;
 
         // Clamp to [0,1] to prevent numerical issues
         A_new = clamp(A_new, 0.0, 1.0);
@@ -295,8 +298,8 @@ function step() {
 function animate() {
     if (!isPlaying) return;
 
-    // Run a few iterations per frame (NOT 50 - that overshoots!)
-    for (let i = 0; i < 8; i++) {
+    // Run more iterations per frame to compensate for smaller dt
+    for (let i = 0; i < 16; i++) {
         step();
     }
 
