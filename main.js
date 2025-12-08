@@ -24,10 +24,10 @@ let currentColorMap = 'custom';
 let customColor1 = [1.0, 1.0, 1.0]; // White (low B)
 let customColor2 = [0.0, 0.0, 0.0]; // Black (high B)
 
-// Gray-Scott constants
-const Da = 1.0;  // Diffusion rate for A
-const Db = 0.5;  // Diffusion rate for B (A diffuses faster)
-const dt = 1.0;  // Time step
+// Gray-Scott constants (scaled for numerical stability)
+const Da = 0.2097;  // Diffusion rate for A (from Pearson paper)
+const Db = 0.105;   // Diffusion rate for B (A diffuses 2x faster)
+const dt = 1.0;     // Time step
 
 // Simple vertex shader
 const vertexShaderSource = `
