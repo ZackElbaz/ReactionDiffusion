@@ -132,7 +132,7 @@ const rdShaderSource = `
         // Feed varies top → bottom : 0.10 → 0.01
         float fMax = 0.10;
         float fMin = 0.01;
-        float f = mix(fMax, fMin, v_texCoord.y);
+        float f = mix(fMin, fMax, v_texCoord.y);
 
         // Gray-Scott equations with spatially-varying f/k:
         // A′ = A + (Dₐ∇²A − A·B² + f(1−A)) Δt
