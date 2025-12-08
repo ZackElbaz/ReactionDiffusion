@@ -573,8 +573,8 @@ void main() {
     float A = 1.0;
     float B = 0.0;
 
-    // Big blob on left side — similar to Karl’s demonstration
-    if (distance(v_texCoord, vec2(0.25, 0.5)) < 0.25) {
+    // SMALL crisp seed at screen center (Karl Sims standard)
+    if (distance(v_texCoord, vec2(0.5, 0.5)) < 0.03) {
         A = 0.0;
         B = 1.0;
     }
