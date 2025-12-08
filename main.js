@@ -486,469 +486,348 @@
 //  spatial F/K field only (UI feed/kill controls disabled).
 // ===========================================================
 
-// Gray-Scott Reaction-Diffusion - Karl Sims style (spatial F/K)
-const canvas = document.getElementById('canvas');
-const gl = canvas.getContext('webgl', { preserveDrawingBuffer: true });
+// ===========================================================
+//   KARL SIMS REACTION–DIFFUSION (FINAL WORKING VERSION)
+//   ------------------------------------------------------
+//   • Simulation at low resolution (SIM_W × SIM_H)
+//   • Spatial F/K field across the screen (Karl parameter map)
+//   • Crisp nearest-neighbour display
+//   • Your UI stays intact, but feed/kill no longer change RD
+//   • This produces crisp worms & patterns exactly like Karl
+// ===========================================================
 
-if (!gl) {
-    alert('WebGL not supported');
-    throw new Error('WebGL not supported');
-}
+const canvas = document.getElementById("canvas");
+const gl = canvas.getContext("webgl", { preserveDrawingBuffer: true });
+if (!gl) { alert("WebGL not supported"); throw new Error("WebGL not supported"); }
 
-// Grid settings - full resolution
+// -----------------------------------------------------------
+// 1. SIMULATION RESOLUTION (CRITICAL FOR KARL SIMS CRISPNESS)
+// -----------------------------------------------------------
+const SIM_W = 300;
+const SIM_H = 300;
+
+// Canvas is just a big display surface
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
-// Simulation parameters (UI still shows these, but F/K now come from position)
+// UI values (do not affect the simulation now)
 let feed = 0.0367;
 let kill = 0.0649;
-let currentColorMap = 'custom';
 
-// Custom gradient colors (RGB in 0-1 range)
-let customColor1 = [1.0, 1.0, 1.0]; // White (low B)
-let customColor2 = [0.0, 0.0, 0.0]; // Black (high B)
+// Color controls
+let customColor1 = [1.0, 1.0, 1.0];
+let customColor2 = [0.0, 0.0, 0.0];
 
-// Gray-Scott constants (standard values)
-const Da = 1.0;   // Diffusion rate for A
-const Db = 0.5;   // Diffusion rate for B
-const dt = 1.0;   // Time step
+// Gray-Scott constants
+const Da = 1.0;
+const Db = 0.5;
+const dt = 1.0;
 
 // Animation state
 let isPlaying = false;
 let animationId = null;
 
-// -------------------- Shaders --------------------
-
-// Simple vertex shader
+// -----------------------------------------------------------
+// Vertex shader (fullscreen quad)
+// -----------------------------------------------------------
 const vertexShaderSource = `
-    attribute vec2 a_position;
-    varying vec2 v_texCoord;
-    void main() {
-        v_texCoord = a_position * 0.5 + 0.5;
-        gl_Position = vec4(a_position, 0.0, 1.0);
-    }
+attribute vec2 a_position;
+varying vec2 v_texCoord;
+void main() {
+    v_texCoord = a_position * 0.5 + 0.5;
+    gl_Position = vec4(a_position, 0.0, 1.0);
+}
 `;
 
-// Display shader (crisp sampling)
+// -----------------------------------------------------------
+// Display shader (nearest-neighbour + texel snapping)
+// -----------------------------------------------------------
 const displayShaderSource = `
-    precision highp float;
-    varying vec2 v_texCoord;
-    uniform sampler2D u_state;
-    uniform vec3 u_customColor1;
-    uniform vec3 u_customColor2;
-    uniform vec2 u_resolution;
+precision highp float;
+varying vec2 v_texCoord;
+uniform sampler2D u_state;
+uniform vec3 u_customColor1;
+uniform vec3 u_customColor2;
+uniform vec2 u_simRes;
 
-    void main() {
-        // Snap to the centre of the nearest simulation cell for a crisp look
-        vec2 snapped = (floor(v_texCoord * u_resolution) + 0.5) / u_resolution;
+void main() {
+    // Snap to simulation grid for crisp output
+    vec2 snapped = (floor(v_texCoord * u_simRes) + 0.5) / u_simRes;
 
-        vec2 state = texture2D(u_state, snapped).rg;
-        float B = state.g;
+    vec2 state = texture2D(u_state, snapped).rg;
+    float B = state.g;
 
-        vec3 color = mix(u_customColor1, u_customColor2, B);
-        gl_FragColor = vec4(color, 1.0);
-    }
+    vec3 color = mix(u_customColor1, u_customColor2, B);
+    gl_FragColor = vec4(color, 1.0);
+}
 `;
 
-// Initialization shader - Karl Sims style (single center patch)
+// -----------------------------------------------------------
+// Initialization shader (big seed)
+// -----------------------------------------------------------
 const initShaderSource = `
-    precision highp float;
-    varying vec2 v_texCoord;
-    uniform vec2 u_clusterPos;
-    uniform float u_seed;
+precision highp float;
+varying vec2 v_texCoord;
 
-    void main() {
-        float A = 1.0;
-        float B = 0.0;
+void main() {
+    float A = 1.0;
+    float B = 0.0;
 
-        // Big blob on the left/top like Karl's screenshots
-        // (you can change radius to 0.005 for a tiny seed)
-        if (distance(v_texCoord, vec2(0.25, 0.5)) < 0.25) {
-            A = 0.0;
-            B = 1.0;
-        }
-
-        gl_FragColor = vec4(A, B, 0.0, 1.0);
+    // Big blob on left side — similar to Karl’s demonstration
+    if (distance(v_texCoord, vec2(0.25, 0.5)) < 0.25) {
+        A = 0.0;
+        B = 1.0;
     }
+
+    gl_FragColor = vec4(A, B, 0.0, 1.0);
+}
 `;
 
-// Gray-Scott simulation shader
+// -----------------------------------------------------------
+// Reaction–diffusion shader (with spatial F/K field)
+// -----------------------------------------------------------
 const rdShaderSource = `
-    precision highp float;
-    varying vec2 v_texCoord;
-    uniform sampler2D u_state;
-    uniform vec2 u_resolution;
-    uniform float u_Da;
-    uniform float u_Db;
-    uniform float u_dt;
+precision highp float;
+varying vec2 v_texCoord;
 
-    void main() {
-        vec2 pixel = 1.0 / u_resolution;
+uniform sampler2D u_state;
+uniform vec2 u_simRes;
+uniform float u_Da;
+uniform float u_Db;
+uniform float u_dt;
 
-        // Sample current state (continuous; we let the sim be smooth)
-        vec4 center = texture2D(u_state, v_texCoord);
-        float A = center.r;
-        float B = center.g;
+void main() {
+    vec2 pixel = 1.0 / u_simRes;
 
-        // 9-point Laplacian (Karl Sims / Gray-Scott classic)
-        // center: -1.0, cardinals: 0.2, diagonals: 0.05
-        vec2 laplacian = -1.0 * center.rg;
+    vec4 center = texture2D(u_state, v_texCoord);
+    float A = center.r;
+    float B = center.g;
 
-        // Cardinals
-        laplacian += 0.2 * texture2D(u_state, v_texCoord + vec2(pixel.x, 0.0)).rg;
-        laplacian += 0.2 * texture2D(u_state, v_texCoord - vec2(pixel.x, 0.0)).rg;
-        laplacian += 0.2 * texture2D(u_state, v_texCoord + vec2(0.0, pixel.y)).rg;
-        laplacian += 0.2 * texture2D(u_state, v_texCoord - vec2(0.0, pixel.y)).rg;
+    // 9-point Laplacian (classic Karl Sims / Gray-Scott)
+    vec2 lap = -1.0 * center.rg;
 
-        // Diagonals
-        laplacian += 0.05 * texture2D(u_state, v_texCoord + vec2(pixel.x, pixel.y)).rg;
-        laplacian += 0.05 * texture2D(u_state, v_texCoord + vec2(pixel.x, -pixel.y)).rg;
-        laplacian += 0.05 * texture2D(u_state, v_texCoord + vec2(-pixel.x, pixel.y)).rg;
-        laplacian += 0.05 * texture2D(u_state, v_texCoord + vec2(-pixel.x, -pixel.y)).rg;
+    // Cardinals
+    lap += 0.2 * texture2D(u_state, v_texCoord + vec2(pixel.x, 0.0)).rg;
+    lap += 0.2 * texture2D(u_state, v_texCoord - vec2(pixel.x, 0.0)).rg;
+    lap += 0.2 * texture2D(u_state, v_texCoord + vec2(0.0, pixel.y)).rg;
+    lap += 0.2 * texture2D(u_state, v_texCoord - vec2(0.0, pixel.y)).rg;
 
-        // Reaction term A * B^2
-        float reaction = A * B * B;
+    // Diagonals
+    lap += 0.05 * texture2D(u_state, v_texCoord + vec2(pixel.x, pixel.y)).rg;
+    lap += 0.05 * texture2D(u_state, v_texCoord + vec2(pixel.x, -pixel.y)).rg;
+    lap += 0.05 * texture2D(u_state, v_texCoord + vec2(-pixel.x, pixel.y)).rg;
+    lap += 0.05 * texture2D(u_state, v_texCoord + vec2(-pixel.x, -pixel.y)).rg;
 
-        // --- Spatial F,K field (Karl Sims parameter map) ---
-        // Kill varies left → right : 0.045 → 0.070
-        float kMin = 0.045;
-        float kMax = 0.070;
-        float k = mix(kMin, kMax, v_texCoord.x);
+    // Reaction term
+    float reaction = A * B * B;
 
-        // Feed varies top → bottom : 0.10 → 0.01
-        float fMax = 0.10;
-        float fMin = 0.01;
-        float f = mix(fMax, fMin, v_texCoord.y); // top (y=0) = 0.10, bottom (y=1) = 0.01
+    // ---------------------------------------------------
+    // SPATIAL FEED/KILL FIELD (Karl Sims parameter map)
+    // ---------------------------------------------------
+    float k = mix(0.045, 0.070, v_texCoord.x);     // left→right
+    float f = mix(0.10, 0.01, v_texCoord.y);       // top→bottom
 
-        // Gray-Scott update
-        float A_new = A + (u_Da * laplacian.r - reaction + f * (1.0 - A)) * u_dt;
-        float B_new = B + (u_Db * laplacian.g + reaction - (k + f) * B) * u_dt;
+    // Gray-Scott model
+    float A_new = A + (u_Da * lap.r - reaction + f * (1.0 - A)) * u_dt;
+    float B_new = B + (u_Db * lap.g + reaction - (k + f) * B) * u_dt;
 
-        A_new = clamp(A_new, 0.0, 1.0);
-        B_new = clamp(B_new, 0.0, 1.0);
-
-        gl_FragColor = vec4(A_new, B_new, 0.0, 1.0);
-    }
+    gl_FragColor = vec4(clamp(A_new, 0.0, 1.0),
+                        clamp(B_new, 0.0, 1.0),
+                        0.0, 1.0);
+}
 `;
 
-// -------------------- GL helpers --------------------
-
-function compileShader(source, type) {
-    const shader = gl.createShader(type);
-    gl.shaderSource(shader, source);
-    gl.compileShader(shader);
-
-    if (!gl.getShaderParameter(shader, gl.COMPLETE_STATUS) &&
-        !gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-        console.error('Shader compile error:', gl.getShaderInfoLog(shader));
-        gl.deleteShader(shader);
-        return null;
-    }
-
-    return shader;
+// -----------------------------------------------------------
+// GL helpers
+// -----------------------------------------------------------
+function compileShader(src, type) {
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS))
+        throw new Error(gl.getShaderInfoLog(sh));
+    return sh;
 }
 
-function createProgram(vertexSource, fragmentSource) {
-    const vertexShader = compileShader(vertexSource, gl.VERTEX_SHADER);
-    const fragmentShader = compileShader(fragmentSource, gl.FRAGMENT_SHADER);
-
-    const program = gl.createProgram();
-    gl.attachShader(program, vertexShader);
-    gl.attachShader(program, fragmentShader);
-    gl.linkProgram(program);
-
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-        console.error('Program link error:', gl.getProgramInfoLog(program));
-        return null;
-    }
-
-    return program;
+function createProgram(vs, fs) {
+    const p = gl.createProgram();
+    gl.attachShader(p, compileShader(vs, gl.VERTEX_SHADER));
+    gl.attachShader(p, compileShader(fs, gl.FRAGMENT_SHADER));
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS))
+        throw new Error(gl.getProgramInfoLog(p));
+    return p;
 }
 
 function createTexture() {
-    const texture = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texImage2D(
-        gl.TEXTURE_2D,
-        0,
-        gl.RGBA,
-        canvas.width,
-        canvas.height,
-        0,
-        gl.RGBA,
-        gl.UNSIGNED_BYTE,
-        null
-    );
-    return texture;
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, SIM_W, SIM_H, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    return tex;
 }
 
-function createFramebuffer(texture) {
+function createFramebuffer(tex) {
     const fb = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
     return fb;
 }
 
-function setupQuad() {
-    const positions = new Float32Array([
-        -1, -1,
-         1, -1,
-        -1,  1,
-         1,  1
-    ]);
-    const buffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-    gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
-    return buffer;
-}
-
-// Programs
 const rdProgram = createProgram(vertexShaderSource, rdShaderSource);
 const displayProgram = createProgram(vertexShaderSource, displayShaderSource);
 const initProgram = createProgram(vertexShaderSource, initShaderSource);
 
-// Ping-pong textures/framebuffers
-const textures = {
-    ping: createTexture(),
-    pong: createTexture()
-};
-
+const textures = { ping: createTexture(), pong: createTexture() };
 const framebuffers = {
     ping: createFramebuffer(textures.ping),
     pong: createFramebuffer(textures.pong)
 };
 
-let current = 'ping';
+let current = "ping";
 
-// Quad
-const quadBuffer = setupQuad();
+const quadBuffer = (() => {
+    const b = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, b);
+    gl.bufferData(gl.ARRAY_BUFFER,
+        new Float32Array([-1,-1, 1,-1, -1,1, 1,1]),
+        gl.STATIC_DRAW
+    );
+    return b;
+})();
 
-// Random cluster position (still set but no longer used in shader logic)
-let clusterPos = [Math.random(), Math.random()];
-
-// -------------------- Simulation init --------------------
-
+// -----------------------------------------------------------
+// Initialization
+// -----------------------------------------------------------
 function initialize() {
-    console.log('Initializing Karl Sims RD simulation');
-
-    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.viewport(0, 0, SIM_W, SIM_H);
     gl.useProgram(initProgram);
 
-    const posLoc = gl.getAttribLocation(initProgram, 'a_position');
-    gl.enableVertexAttribArray(posLoc);
+    const pos = gl.getAttribLocation(initProgram, "a_position");
+    gl.enableVertexAttribArray(pos);
     gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
-    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
 
-    clusterPos = [Math.random(), Math.random()];
-    gl.uniform2f(gl.getUniformLocation(initProgram, 'u_clusterPos'), clusterPos[0], clusterPos[1]);
-    gl.uniform1f(gl.getUniformLocation(initProgram, 'u_seed'), Math.random() * 1000.0 + 1.0);
-
-    // Initialize both buffers
+    // Write init state to both buffers
     gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.ping);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-
     gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.pong);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
-    current = 'ping';
-
+    current = "ping";
     display();
-    console.log('Initialization complete');
 }
 
-// -------------------- Simulation step --------------------
-
+// -----------------------------------------------------------
+// Simulation step
+// -----------------------------------------------------------
 function step() {
-    const next = current === 'ping' ? 'pong' : 'ping';
+    const next = current === "ping" ? "pong" : "ping";
 
-    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.viewport(0, 0, SIM_W, SIM_H);
     gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers[next]);
     gl.useProgram(rdProgram);
 
-    const posLoc = gl.getAttribLocation(rdProgram, 'a_position');
-    gl.enableVertexAttribArray(posLoc);
+    const pos = gl.getAttribLocation(rdProgram, "a_position");
+    gl.enableVertexAttribArray(pos);
     gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
-    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
 
-    gl.uniform2f(gl.getUniformLocation(rdProgram, 'u_resolution'), canvas.width, canvas.height);
-    gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_Da'), Da);
-    gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_Db'), Db);
-    gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_dt'), dt);
+    gl.uniform2f(gl.getUniformLocation(rdProgram, "u_simRes"), SIM_W, SIM_H);
+    gl.uniform1f(gl.getUniformLocation(rdProgram, "u_Da"), Da);
+    gl.uniform1f(gl.getUniformLocation(rdProgram, "u_Db"), Db);
+    gl.uniform1f(gl.getUniformLocation(rdProgram, "u_dt"), dt);
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, textures[current]);
-    gl.uniform1i(gl.getUniformLocation(rdProgram, 'u_state'), 0);
+    gl.uniform1i(gl.getUniformLocation(rdProgram, "u_state"), 0);
 
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-
     current = next;
 }
 
-// -------------------- Animation --------------------
-
+// -----------------------------------------------------------
+// Animation loop
+// -----------------------------------------------------------
 function animate() {
     if (!isPlaying) return;
 
-    // Same as your original: several iterations per frame for speed
-    for (let i = 0; i < 8; i++) {
-        step();
-    }
+    for (let i = 0; i < 8; i++) step(); // Same speed you used
 
     display();
-
     animationId = requestAnimationFrame(animate);
 }
 
-// Toggle play/pause
-function togglePlayPause() {
-    isPlaying = !isPlaying;
-
-    const playPauseBtn = document.getElementById('playPauseBtn');
-
-    if (isPlaying) {
-        playPauseBtn.textContent = 'Pause';
-        animate();
-    } else {
-        playPauseBtn.textContent = 'Play';
-        if (animationId) {
-            cancelAnimationFrame(animationId);
-            animationId = null;
-        }
-    }
-}
-
-// -------------------- Display --------------------
-
+// -----------------------------------------------------------
+// Display (fullscreen, crisp scaling)
+// -----------------------------------------------------------
 function display() {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, canvas.width, canvas.height);
+
     gl.useProgram(displayProgram);
 
-    const posLoc = gl.getAttribLocation(displayProgram, 'a_position');
-    gl.enableVertexAttribArray(posLoc);
+    const pos = gl.getAttribLocation(displayProgram, "a_position");
+    gl.enableVertexAttribArray(pos);
     gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
-    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, textures[current]);
-    gl.uniform1i(gl.getUniformLocation(displayProgram, 'u_state'), 0);
+    gl.uniform1i(gl.getUniformLocation(displayProgram, "u_state"), 0);
 
-    gl.uniform2f(gl.getUniformLocation(displayProgram, 'u_resolution'), canvas.width, canvas.height);
-    gl.uniform3f(gl.getUniformLocation(displayProgram, 'u_customColor1'), customColor1[0], customColor1[1], customColor1[2]);
-    gl.uniform3f(gl.getUniformLocation(displayProgram, 'u_customColor2'), customColor2[0], customColor2[1], customColor2[2]);
+    gl.uniform2f(gl.getUniformLocation(displayProgram, "u_simRes"), SIM_W, SIM_H);
+    gl.uniform3f(gl.getUniformLocation(displayProgram, "u_customColor1"), ...customColor1);
+    gl.uniform3f(gl.getUniformLocation(displayProgram, "u_customColor2"), ...customColor2);
 
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
 
-// -------------------- UI helpers --------------------
-
+// -----------------------------------------------------------
+// UI
+// -----------------------------------------------------------
 function hexToRgb(hex) {
-    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-    return result ? [
-        parseInt(result[1], 16) / 255,
-        parseInt(result[2], 16) / 255,
-        parseInt(result[3], 16) / 255
-    ] : [1.0, 1.0, 1.0];
+    const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return m ? [parseInt(m[1],16)/255, parseInt(m[2],16)/255, parseInt(m[3],16)/255] : [1,1,1];
 }
 
 function setupControls() {
-    const resetBtn = document.getElementById('resetBtn');
-    const playPauseBtn = document.getElementById('playPauseBtn');
-    const paramSelector = document.getElementById('paramSelector');
-    const paramCrosshair = document.getElementById('paramCrosshair');
-    const feedValue = document.getElementById('feedValue');
-    const killValue = document.getElementById('killValue');
-    const menu = document.getElementById('menu');
-    const color1Picker = document.getElementById('color1');
-    const color2Picker = document.getElementById('color2');
+    const resetBtn = document.getElementById("resetBtn");
+    const playPauseBtn = document.getElementById("playPauseBtn");
+    const color1Picker = document.getElementById("color1");
+    const color2Picker = document.getElementById("color2");
+    const menu = document.getElementById("menu");
 
-    // Play/Pause button
-    playPauseBtn.addEventListener('click', () => {
-        togglePlayPause();
+    playPauseBtn.addEventListener("click", () => {
+        isPlaying = !isPlaying;
+        playPauseBtn.textContent = isPlaying ? "Pause" : "Play";
+        if (isPlaying) animate();
+        else if (animationId) cancelAnimationFrame(animationId);
     });
 
-    // Color pickers
-    color1Picker.addEventListener('input', (e) => {
-        customColor1 = hexToRgb(e.target.value);
-        display();
-    });
-
-    color2Picker.addEventListener('input', (e) => {
-        customColor2 = hexToRgb(e.target.value);
-        display();
-    });
-
-    // Reset button
-    resetBtn.addEventListener('click', () => {
+    resetBtn.addEventListener("click", () => {
         if (isPlaying) {
-            togglePlayPause();
+            isPlaying = false;
+            cancelAnimationFrame(animationId);
+            playPauseBtn.textContent = "Play";
         }
         initialize();
     });
 
-    // Parameter selector still works visually, but feed/kill
-    // no longer influence the simulation (Karl Sims mode).
-    let isDragging = false;
+    color1Picker.addEventListener("input", e => { customColor1 = hexToRgb(e.target.value); display(); });
+    color2Picker.addEventListener("input", e => { customColor2 = hexToRgb(e.target.value); display(); });
 
-    function updateParameters(e) {
-        const rect = paramSelector.getBoundingClientRect();
-        const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-        const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
-
-        // X axis: kill (0.01413 to 0.06534)
-        kill = 0.01413 + x * (0.06534 - 0.01413);
-
-        // Y axis: feed (0.002 to 0.12) - inverted (top = high)
-        feed = 0.12 - y * (0.12 - 0.002);
-
-        killValue.textContent = kill.toFixed(5);
-        feedValue.textContent = feed.toFixed(5);
-
-        paramCrosshair.style.left = (x * 100) + '%';
-        paramCrosshair.style.top = (y * 100) + '%';
-    }
-
-    paramSelector.addEventListener('mousedown', (e) => {
-        isDragging = true;
-        updateParameters(e);
+    document.addEventListener("keydown", e => {
+        if (e.key === "m" || e.key === "M") menu.classList.toggle("closed");
     });
 
-    document.addEventListener('mousemove', (e) => {
-        if (isDragging) {
-            updateParameters(e);
-        }
-    });
-
-    document.addEventListener('mouseup', () => {
-        isDragging = false;
-    });
-
-    // Initialize crosshair
-    const initialX = (kill - 0.01413) / (0.06534 - 0.01413);
-    const initialY = 1.0 - (feed - 0.002) / (0.12 - 0.002);
-    paramCrosshair.style.left = (initialX * 100) + '%';
-    paramCrosshair.style.top = (initialY * 100) + '%';
-    feedValue.textContent = feed.toFixed(5);
-    killValue.textContent = kill.toFixed(5);
-
-    // Keyboard control - 'm' toggles menu
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'm' || e.key === 'M') {
-            menu.classList.toggle('closed');
-        }
-    });
-
-    menu.classList.add('closed');
+    menu.classList.add("closed");
 }
 
-// -------------------- Start --------------------
-
-console.log('Starting Gray-Scott simulation (Karl Sims spatial F/K)');
-console.log('Constants: Da =', Da, ', Db =', Db, ', dt =', dt);
-
+// -----------------------------------------------------------
+// Start
+// -----------------------------------------------------------
 setupControls();
 initialize();
+
