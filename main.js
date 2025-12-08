@@ -117,12 +117,21 @@ const rdShaderSource = `
         // Reaction term: A·B²
         float reaction = A * B * B;
 
-        // Gray-Scott equations (UNIFORM feed/kill across entire domain):
+        // Spatial FK-map: feed/kill vary across screen
+        float kMin = 0.01413;
+        float kMax = 0.06534;
+        float fMin = 0.002;
+        float fMax = 0.12;
+
+        float k = kMin + v_texCoord.x * (kMax - kMin);
+        float f = fMax - v_texCoord.y * (fMax - fMin);
+
+        // Gray-Scott equations with spatially-varying f/k:
         // A′ = A + (Dₐ∇²A − A·B² + f(1−A)) Δt
         // B′ = B + (Db∇²B + A·B² − (k+f)B) Δt
 
-        float A_new = A + (u_Da * laplacian.r - reaction + u_feed * (1.0 - A)) * u_dt;
-        float B_new = B + (u_Db * laplacian.g + reaction - (u_kill + u_feed) * B) * u_dt;
+        float A_new = A + (u_Da * laplacian.r - reaction + f * (1.0 - A)) * u_dt;
+        float B_new = B + (u_Db * laplacian.g + reaction - (k + f) * B) * u_dt;
 
         // Clamp to [0,1] to prevent numerical issues
         A_new = clamp(A_new, 0.0, 1.0);
