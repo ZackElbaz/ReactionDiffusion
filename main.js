@@ -65,7 +65,7 @@ const displayShaderSource = `
     }
 `;
 
-// Initialization shader - random cluster with small B seeding
+// Initialization shader - multiple corner blobs for FK-map debugging
 const initShaderSource = `
     precision highp float;
     varying vec2 v_texCoord;
@@ -81,13 +81,19 @@ const initShaderSource = `
         float A = 1.0;
         float B = 0.0;
 
-        // Create a TINY cluster at random position (critical - not too large!)
-        float dist = distance(v_texCoord, u_clusterPos);
+        // DEBUG MODE: Create 4 seed blobs at corners
+        vec2 centers[4];
+        centers[0] = vec2(0.2, 0.2);
+        centers[1] = vec2(0.8, 0.2);
+        centers[2] = vec2(0.2, 0.8);
+        centers[3] = vec2(0.8, 0.8);
 
-        if (dist < 0.02) {
-            // Small seed with partial B concentration
-            B = 0.25;
-            A = 0.75;
+        for (int i = 0; i < 4; i++) {
+            float d = distance(v_texCoord, centers[i]);
+            if (d < 0.03) {
+                B = 0.25;
+                A = 0.75;
+            }
         }
 
         // Add tiny random noise across the canvas
@@ -137,12 +143,21 @@ const rdShaderSource = `
         // Reaction term: A·B²
         float reaction = A * B * B;
 
+        // DEBUG MODE: Spatial FK-map - compute feed/kill per-pixel
+        float kMin = 0.01413;
+        float kMax = 0.06534;
+        float fMin = 0.002;
+        float fMax = 0.12;
+
+        float k = kMin + v_texCoord.x * (kMax - kMin);
+        float f = fMax - v_texCoord.y * (fMax - fMin);
+
         // Gray-Scott equations (EXACT from user specification):
         // A′ = A + (Dₐ∇²A − A·B² + f(1−A)) Δt
         // B′ = B + (Db∇²B + A·B² − (k+f)B) Δt
 
-        float A_new = A + (u_Da * laplacian.r - reaction + u_feed * (1.0 - A)) * u_dt;
-        float B_new = B + (u_Db * laplacian.g + reaction - (u_kill + u_feed) * B) * u_dt;
+        float A_new = A + (u_Da * laplacian.r - reaction + f * (1.0 - A)) * u_dt;
+        float B_new = B + (u_Db * laplacian.g + reaction - (k + f) * B) * u_dt;
 
         // Clamp to [0,1] to prevent numerical issues
         A_new = clamp(A_new, 0.0, 1.0);
