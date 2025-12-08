@@ -12,6 +12,8 @@ canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
 // Simulation parameters - "worms" preset for classic pattern
+let useFKMap = true;
+
 let feed = 0.0367;
 let kill = 0.0649;
 let currentColorMap = 'custom';
@@ -93,6 +95,10 @@ const rdShaderSource = `
     uniform float u_Da;
     uniform float u_Db;
     uniform float u_dt;
+    uniform bool u_useFKMap;
+    uniform float u_constFeed;
+    uniform float u_constKill;
+
 
     void main() {
         vec2 pixel = 1.0 / u_resolution;
@@ -124,15 +130,25 @@ const rdShaderSource = `
         // float kMax = 0.06534;
         // float fMin = 0.002;
         // float fMax = 0.12;
-        // Kill varies left → right : 0.045 → 0.070
-        float kMin = 0.045;
-        float kMax = 0.070;
-        float k = mix(kMin, kMax, v_texCoord.x);
+        float f;
+        float k;
         
-        // Feed varies top → bottom : 0.10 → 0.01
-        float fMax = 0.10;
-        float fMin = 0.01;
-        float f = mix(fMin, fMax, v_texCoord.y);
+        if (u_useFKMap) {
+            // --- FK MAP MODE (your current logic) ---
+            float kMin = 0.045;
+            float kMax = 0.070;
+            k = mix(kMin, kMax, v_texCoord.x);
+        
+            float fMax = 0.10;
+            float fMin = 0.01;
+            f = mix(fMin, fMax, v_texCoord.y);
+        
+        } else {
+            // --- CONSTANT MODE (from UI selector) ---
+            f = u_constFeed;
+            k = u_constKill;
+        }
+
 
         // Gray-Scott equations with spatially-varying f/k:
         // A′ = A + (Dₐ∇²A − A·B² + f(1−A)) Δt
@@ -288,6 +304,14 @@ function step() {
     gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_Db'), Db);
     gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_dt'), dt);
 
+    // Feed/kill mode toggle
+    gl.uniform1i(gl.getUniformLocation(rdProgram, 'u_useFKMap'), useFKMap);
+    
+    // Constant values from crosshair
+    gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_constFeed'), feed);
+    gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_constKill'), kill);
+
+
     // Bind current state texture
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, textures[current]);
@@ -378,6 +402,18 @@ function setupControls() {
     const menu = document.getElementById('menu');
     const color1Picker = document.getElementById('color1');
     const color2Picker = document.getElementById('color2');
+    const toggleFKModeBtn = document.getElementById('toggleFKModeBtn');
+
+    toggleFKModeBtn.addEventListener('click', () => {
+        useFKMap = !useFKMap;
+    
+        toggleFKModeBtn.textContent = useFKMap
+            ? "Use FK Map"
+            : "Use Constant F/K";
+    
+        console.log("FK mode:", useFKMap ? "MAP" : "CONSTANT");
+    });
+
 
     // Play/Pause button
     playPauseBtn.addEventListener('click', () => {
