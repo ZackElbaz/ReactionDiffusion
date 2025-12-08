@@ -119,7 +119,7 @@ const displayShaderSource = `
     }
 `;
 
-// STEP 2: Initialize with random blobs
+// STEP 2: Initialize with continuous concentration values
 const initShaderSource = `
     precision highp float;
     varying vec2 v_texCoord;
@@ -130,17 +130,24 @@ const initShaderSource = `
     }
 
     void main() {
-        // Start with A=1, B=0 everywhere
+        // Start with full concentration of A everywhere
         float A = 1.0;
-        float B = 0.0;
 
-        // Create denser random blobs of B for better pattern formation
-        float rand1 = random(v_texCoord * 5.0);
-        float rand2 = random(v_texCoord * 10.0);
+        // Add small random noise for B (0.0 to 0.05) everywhere
+        float noise = random(v_texCoord * 100.0) * 0.05;
 
-        if (rand1 > 0.9 || rand2 > 0.95) {
-            B = 1.0;
-            A = 0.0;
+        // Create scattered spots with higher B concentration (0.5 to 1.0)
+        float rand1 = random(v_texCoord * 3.0);
+        float rand2 = random(v_texCoord * 7.0);
+
+        float B = noise;
+
+        // In some spots, add more B (but still keep some A)
+        if (rand1 > 0.95 || rand2 > 0.98) {
+            // Add B concentration between 0.5 and 1.0
+            B = 0.5 + random(v_texCoord * 13.0) * 0.5;
+            // Reduce A accordingly, but don't make it zero
+            A = 1.0 - B * 0.5;
         }
 
         gl_FragColor = vec4(A, B, 0.0, 1.0);
@@ -172,9 +179,9 @@ const rdShaderSource = `
         lap += texture2D(u_state, v_texCoord - vec2(pixel.x, 0.0)).rg;
 
         // Constants
-        float Da = 1.0;
-        float Db = 0.5;
-        float dt = 1.0;
+        float Da = 1.0;  // Diffusion rate for A
+        float Db = 0.5;  // Diffusion rate for B (slower than A)
+        float dt = 0.6;  // Time step - smaller for more gradual evolution
         float f = u_feed;
         float k = u_kill;
 
