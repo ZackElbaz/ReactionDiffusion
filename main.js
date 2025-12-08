@@ -1,833 +1,474 @@
-// // Gray-Scott Reaction-Diffusion - Clean Implementation
-// const canvas = document.getElementById('canvas');
-// const gl = canvas.getContext('webgl', { preserveDrawingBuffer: true });
-
-// if (!gl) {
-//     alert('WebGL not supported');
-//     throw new Error('WebGL not supported');
-// }
-
-// // Grid settings - FULL RESOLUTION like Karl Sims
-// canvas.width = window.innerWidth;
-// canvas.height = window.innerHeight;
-
-// // Simulation parameters - "worms" preset for classic pattern
-// let feed = 0.0367;
-// let kill = 0.0649;
-// let currentColorMap = 'custom';
-
-// // Custom gradient colors (RGB in 0-1 range)
-// let customColor1 = [1.0, 1.0, 1.0]; // White (low B)
-// let customColor2 = [0.0, 0.0, 0.0]; // Black (high B)
-
-// // Gray-Scott constants (standard values for pattern formation)
-// const Da = 1.0;     // Diffusion rate for A
-// const Db = 0.5;     // Diffusion rate for B (A diffuses 2x faster)
-// const dt = 1.0;     // Standard time step
-
-
-// // Animation state
-// let isPlaying = false;
-// let animationId = null;
-
-// // Simple vertex shader
-// const vertexShaderSource = `
-//     attribute vec2 a_position;
-//     varying vec2 v_texCoord;
-//     void main() {
-//         v_texCoord = a_position * 0.5 + 0.5;
-//         gl_Position = vec4(a_position, 0.0, 1.0);
-//     }
-// `;
-
-// // Display shader
-// const displayShaderSource = `
-//     precision highp float;
-//     varying vec2 v_texCoord;
-//     uniform sampler2D u_state;
-//     uniform vec3 u_customColor1;
-//     uniform vec3 u_customColor2;
-
-//     void main() {
-//         vec2 state = texture2D(u_state, v_texCoord).rg;
-//         float B = state.g;
-
-//         // Linear gradient between custom colors based on B concentration
-//         vec3 color = mix(u_customColor1, u_customColor2, B);
-
-//         gl_FragColor = vec4(color, 1.0);
-//     }
-// `;
-
-// // Initialization shader - Karl Sims style (single center patch)
-// const initShaderSource = `
-//     precision highp float;
-//     varying vec2 v_texCoord;
-//     uniform vec2 u_clusterPos;
-//     uniform float u_seed;
-
-//     void main() {
-//         // Default: A=1.0, B=0.0 everywhere
-//         float A = 1.0;
-//         float B = 0.0;
-
-//         // Tiny seed at center (Karl Sims method)
-//         // if (distance(v_texCoord, vec2(0.5)) < 0.005) {
-//         if (distance(v_texCoord, vec2(0.5)) < 0.02) {
-//             B = 1.0;
-//             A = 0.0;
-//         }
-
-//         gl_FragColor = vec4(A, B, 0.0, 1.0);
-//     }
-// `;
-
-// // Gray-Scott simulation shader - EXACT equations from user
-// const rdShaderSource = `
-//     precision highp float;
-//     varying vec2 v_texCoord;
-//     uniform sampler2D u_state;
-//     uniform vec2 u_resolution;
-//     uniform float u_feed;
-//     uniform float u_kill;
-//     uniform float u_Da;
-//     uniform float u_Db;
-//     uniform float u_dt;
-
-//     void main() {
-//         vec2 pixel = 1.0 / u_resolution;
-
-//         // Sample current state
-//         vec4 center = texture2D(u_state, v_texCoord);
-//         float A = center.r;
-//         float B = center.g;
-
-//         // Correct 9-point Laplacian: ∇²
-//         // center: -1.0, cardinals: 0.2 each, diagonals: 0.05 each
-//         vec2 laplacian = -1.0 * center.rg;
-//         // Cardinals (0.2 each)
-//         laplacian += 0.2 * texture2D(u_state, v_texCoord + vec2(pixel.x, 0.0)).rg;
-//         laplacian += 0.2 * texture2D(u_state, v_texCoord - vec2(pixel.x, 0.0)).rg;
-//         laplacian += 0.2 * texture2D(u_state, v_texCoord + vec2(0.0, pixel.y)).rg;
-//         laplacian += 0.2 * texture2D(u_state, v_texCoord - vec2(0.0, pixel.y)).rg;
-//         // Diagonals (0.05 each)
-//         laplacian += 0.05 * texture2D(u_state, v_texCoord + vec2(pixel.x, pixel.y)).rg;
-//         laplacian += 0.05 * texture2D(u_state, v_texCoord + vec2(pixel.x, -pixel.y)).rg;
-//         laplacian += 0.05 * texture2D(u_state, v_texCoord + vec2(-pixel.x, pixel.y)).rg;
-//         laplacian += 0.05 * texture2D(u_state, v_texCoord + vec2(-pixel.x, -pixel.y)).rg;
-
-//         // Reaction term: A·B²
-//         float reaction = A * B * B;
-
-//         // Spatial FK-map: feed/kill vary across screen
-//         // float kMin = 0.01413;
-//         // float kMax = 0.06534;
-//         // float fMin = 0.002;
-//         // float fMax = 0.12;
-//         // Kill varies left → right : 0.045 → 0.070
-//         float kMin = 0.045;
-//         float kMax = 0.070;
-//         float k = mix(kMin, kMax, v_texCoord.x);
-        
-//         // Feed varies top → bottom : 0.10 → 0.01
-//         float fMax = 0.10;
-//         float fMin = 0.01;
-//         float f = mix(fMin, fMax, v_texCoord.y);
-
-//         // Gray-Scott equations with spatially-varying f/k:
-//         // A′ = A + (Dₐ∇²A − A·B² + f(1−A)) Δt
-//         // B′ = B + (Db∇²B + A·B² − (k+f)B) Δt
-
-//         float A_new = A + (u_Da * laplacian.r - reaction + f * (1.0 - A)) * u_dt;
-//         float B_new = B + (u_Db * laplacian.g + reaction - (k + f) * B) * u_dt;
-
-//         // Clamp to [0,1] to prevent numerical issues
-//         A_new = clamp(A_new, 0.0, 1.0);
-//         B_new = clamp(B_new, 0.0, 1.0);
-
-//         gl_FragColor = vec4(A_new, B_new, 0.0, 1.0);
-//     }
-// `;
-
-// // Compile shader
-// function compileShader(source, type) {
-//     const shader = gl.createShader(type);
-//     gl.shaderSource(shader, source);
-//     gl.compileShader(shader);
-
-//     if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-//         console.error('Shader compile error:', gl.getShaderInfoLog(shader));
-//         gl.deleteShader(shader);
-//         return null;
-//     }
-
-//     return shader;
-// }
-
-// // Create program
-// function createProgram(vertexSource, fragmentSource) {
-//     const vertexShader = compileShader(vertexSource, gl.VERTEX_SHADER);
-//     const fragmentShader = compileShader(fragmentSource, gl.FRAGMENT_SHADER);
-
-//     const program = gl.createProgram();
-//     gl.attachShader(program, vertexShader);
-//     gl.attachShader(program, fragmentShader);
-//     gl.linkProgram(program);
-
-//     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-//         console.error('Program link error:', gl.getProgramInfoLog(program));
-//         return null;
-//     }
-
-//     return program;
-// }
-
-// // Create texture
-// function createTexture() {
-//     const texture = gl.createTexture();
-//     gl.bindTexture(gl.TEXTURE_2D, texture);
-//     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-//     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-//     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-//     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-//     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, canvas.width, canvas.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-//     return texture;
-// }
-
-// // Create framebuffer
-// function createFramebuffer(texture) {
-//     const fb = gl.createFramebuffer();
-//     gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-//     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
-//     return fb;
-// }
-
-// // Setup fullscreen quad
-// function setupQuad() {
-//     const positions = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
-//     const buffer = gl.createBuffer();
-//     gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-//     gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
-//     return buffer;
-// }
-
-// // Create programs
-// const rdProgram = createProgram(vertexShaderSource, rdShaderSource);
-// const displayProgram = createProgram(vertexShaderSource, displayShaderSource);
-// const initProgram = createProgram(vertexShaderSource, initShaderSource);
-
-// // Create textures for ping-pong rendering
-// const textures = {
-//     ping: createTexture(),
-//     pong: createTexture()
-// };
-
-// const framebuffers = {
-//     ping: createFramebuffer(textures.ping),
-//     pong: createFramebuffer(textures.pong)
-// };
-
-// let current = 'ping';
-
-// // Create quad
-// const quadBuffer = setupQuad();
-
-// // Random cluster position (will be set on initialization)
-// let clusterPos = [Math.random(), Math.random()];
-
-// // Initialize simulation
-// function initialize() {
-//     console.log('Initializing Karl Sims RD simulation');
-
-//     gl.viewport(0, 0, canvas.width, canvas.height);
-//     gl.useProgram(initProgram);
-
-//     const posLoc = gl.getAttribLocation(initProgram, 'a_position');
-//     gl.enableVertexAttribArray(posLoc);
-//     gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
-//     gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
-
-//     // Set random cluster position and seed
-//     clusterPos = [Math.random(), Math.random()];
-//     gl.uniform2f(gl.getUniformLocation(initProgram, 'u_clusterPos'), clusterPos[0], clusterPos[1]);
-//     gl.uniform1f(gl.getUniformLocation(initProgram, 'u_seed'), Math.random() * 1000.0 + 1.0);
-
-//     // Initialize both buffers
-//     gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.ping);
-//     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-
-//     gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.pong);
-//     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-
-//     current = 'ping';
-
-//     // Display initial state
-//     display();
-
-//     console.log('Initialization complete');
-// }
-
-// // Run one simulation step
-// function step() {
-//     const next = current === 'ping' ? 'pong' : 'ping';
-
-//     gl.viewport(0, 0, canvas.width, canvas.height);
-//     gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers[next]);
-//     gl.useProgram(rdProgram);
-
-//     const posLoc = gl.getAttribLocation(rdProgram, 'a_position');
-//     gl.enableVertexAttribArray(posLoc);
-//     gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
-//     gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
-
-//     // Set uniforms
-//     gl.uniform2f(gl.getUniformLocation(rdProgram, 'u_resolution'), canvas.width, canvas.height);
-//     gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_feed'), feed);
-//     gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_kill'), kill);
-//     gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_Da'), Da);
-//     gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_Db'), Db);
-//     gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_dt'), dt);
-
-//     // Bind current state texture
-//     gl.activeTexture(gl.TEXTURE0);
-//     gl.bindTexture(gl.TEXTURE_2D, textures[current]);
-//     gl.uniform1i(gl.getUniformLocation(rdProgram, 'u_state'), 0);
-
-//     // Draw
-//     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-
-//     current = next;
-// }
-
-// // Animation loop
-// function animate() {
-//     if (!isPlaying) return;
-
-//     // Run a few iterations per frame (NOT 50 - that overshoots!)
-//     for (let i = 0; i < 8; i++) {
-//         step();
-//     }
-
-//     // Display result
-//     display();
-
-//     // Continue animation
-//     animationId = requestAnimationFrame(animate);
-// }
-
-// // Toggle play/pause
-// function togglePlayPause() {
-//     isPlaying = !isPlaying;
-
-//     const playPauseBtn = document.getElementById('playPauseBtn');
-
-//     if (isPlaying) {
-//         playPauseBtn.textContent = 'Pause';
-//         animate();
-//     } else {
-//         playPauseBtn.textContent = 'Play';
-//         if (animationId) {
-//             cancelAnimationFrame(animationId);
-//             animationId = null;
-//         }
-//     }
-// }
-
-// // Display to screen
-// function display() {
-//     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-//     gl.viewport(0, 0, canvas.width, canvas.height);
-//     gl.useProgram(displayProgram);
-
-//     const posLoc = gl.getAttribLocation(displayProgram, 'a_position');
-//     gl.enableVertexAttribArray(posLoc);
-//     gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
-//     gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
-
-//     // Bind current state
-//     gl.activeTexture(gl.TEXTURE0);
-//     gl.bindTexture(gl.TEXTURE_2D, textures[current]);
-//     gl.uniform1i(gl.getUniformLocation(displayProgram, 'u_state'), 0);
-
-//     // Set custom colors
-//     gl.uniform3f(gl.getUniformLocation(displayProgram, 'u_customColor1'), customColor1[0], customColor1[1], customColor1[2]);
-//     gl.uniform3f(gl.getUniformLocation(displayProgram, 'u_customColor2'), customColor2[0], customColor2[1], customColor2[2]);
-
-//     // Draw
-//     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-// }
-
-// // Helper function to convert hex color to RGB 0-1 range
-// function hexToRgb(hex) {
-//     const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-//     return result ? [
-//         parseInt(result[1], 16) / 255,
-//         parseInt(result[2], 16) / 255,
-//         parseInt(result[3], 16) / 255
-//     ] : [1.0, 1.0, 1.0];
-// }
-
-// // Setup UI controls
-// function setupControls() {
-//     const resetBtn = document.getElementById('resetBtn');
-//     const playPauseBtn = document.getElementById('playPauseBtn');
-//     const paramSelector = document.getElementById('paramSelector');
-//     const paramCrosshair = document.getElementById('paramCrosshair');
-//     const feedValue = document.getElementById('feedValue');
-//     const killValue = document.getElementById('killValue');
-//     const menu = document.getElementById('menu');
-//     const color1Picker = document.getElementById('color1');
-//     const color2Picker = document.getElementById('color2');
-
-//     // Play/Pause button
-//     playPauseBtn.addEventListener('click', () => {
-//         console.log('Play/Pause button clicked');
-//         togglePlayPause();
-//     });
-
-//     // Color pickers
-//     color1Picker.addEventListener('input', (e) => {
-//         customColor1 = hexToRgb(e.target.value);
-//         display(); // Update display immediately
-//     });
-
-//     color2Picker.addEventListener('input', (e) => {
-//         customColor2 = hexToRgb(e.target.value);
-//         display(); // Update display immediately
-//     });
-
-//     // Reset button
-//     resetBtn.addEventListener('click', () => {
-//         console.log('Reset button clicked');
-
-//         // Stop animation if playing
-//         if (isPlaying) {
-//             togglePlayPause();
-//         }
-
-//         initialize();
-//     });
-
-//     // Parameter selector (X/Y for kill/feed)
-//     let isDragging = false;
-
-//     function updateParameters(e) {
-//         const rect = paramSelector.getBoundingClientRect();
-//         const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-//         const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
-
-//         // X axis: kill (0.01413 to 0.06534)
-//         kill = 0.01413 + x * (0.06534 - 0.01413);
-
-//         // Y axis: feed (0.002 to 0.12) - inverted (top = high)
-//         feed = 0.12 - y * (0.12 - 0.002);
-
-//         // Update display
-//         killValue.textContent = kill.toFixed(5);
-//         feedValue.textContent = feed.toFixed(5);
-
-//         // Update crosshair position
-//         paramCrosshair.style.left = (x * 100) + '%';
-//         paramCrosshair.style.top = (y * 100) + '%';
-//     }
-
-//     paramSelector.addEventListener('mousedown', (e) => {
-//         isDragging = true;
-//         updateParameters(e);
-//     });
-
-//     document.addEventListener('mousemove', (e) => {
-//         if (isDragging) {
-//             updateParameters(e);
-//         }
-//     });
-
-//     document.addEventListener('mouseup', () => {
-//         isDragging = false;
-//     });
-
-//     // Initialize crosshair position for default values
-//     const initialX = (kill - 0.01413) / (0.06534 - 0.01413);
-//     const initialY = 1.0 - (feed - 0.002) / (0.12 - 0.002);
-//     paramCrosshair.style.left = (initialX * 100) + '%';
-//     paramCrosshair.style.top = (initialY * 100) + '%';
-//     feedValue.textContent = feed.toFixed(5);
-//     killValue.textContent = kill.toFixed(5);
-
-//     // Keyboard control - 'm' key toggles menu
-//     document.addEventListener('keydown', (e) => {
-//         if (e.key === 'm' || e.key === 'M') {
-//             menu.classList.toggle('closed');
-//         }
-//     });
-
-//     // Start with menu closed
-//     menu.classList.add('closed');
-// }
-
-// // Start
-// console.log('Starting Gray-Scott simulation');
-// console.log('Default parameters: feed =', feed, ', kill =', kill);
-// console.log('Constants: Da =', Da, ', Db =', Db, ', dt =', dt);
-
-// setupControls();
-// initialize();
-
-
-
-
-
-
-
-// ===========================================================
-//  KARL SIMS REACTION–DIFFUSION (FULLY CORRECTED VERSION)
-//  -------------------------------------------------------
-//  Crisp output, correct Laplacian, correct dt, correct seed,
-//  spatial F/K field only (UI feed/kill controls disabled).
-// ===========================================================
-
-// ===========================================================
-//   KARL SIMS REACTION–DIFFUSION (FINAL WORKING VERSION)
-//   ------------------------------------------------------
-//   • Simulation at low resolution (SIM_W × SIM_H)
-//   • Spatial F/K field across the screen (Karl parameter map)
-//   • Crisp nearest-neighbour display
-//   • Your UI stays intact, but feed/kill no longer change RD
-//   • This produces crisp worms & patterns exactly like Karl
-// ===========================================================
-
-const canvas = document.getElementById("canvas");
-const gl = canvas.getContext("webgl", { preserveDrawingBuffer: true });
-if (!gl) { alert("WebGL not supported"); throw new Error("WebGL not supported"); }
-
-// -----------------------------------------------------------
-// 1. SIMULATION RESOLUTION (CRITICAL FOR KARL SIMS CRISPNESS)
-// -----------------------------------------------------------
-const SIM_W = 300;
-const SIM_H = 300;
-
-// Canvas is just a big display surface
+// Gray-Scott Reaction-Diffusion - Clean Implementation
+const canvas = document.getElementById('canvas');
+const gl = canvas.getContext('webgl', { preserveDrawingBuffer: true });
+
+if (!gl) {
+    alert('WebGL not supported');
+    throw new Error('WebGL not supported');
+}
+
+// Grid settings - FULL RESOLUTION like Karl Sims
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
-// UI values (do not affect the simulation now)
+// Simulation parameters - "worms" preset for classic pattern
 let feed = 0.0367;
 let kill = 0.0649;
+let currentColorMap = 'custom';
 
-// Color controls
-let customColor1 = [1.0, 1.0, 1.0];
-let customColor2 = [0.0, 0.0, 0.0];
+// Custom gradient colors (RGB in 0-1 range)
+let customColor1 = [1.0, 1.0, 1.0]; // White (low B)
+let customColor2 = [0.0, 0.0, 0.0]; // Black (high B)
 
-// Gray-Scott constants
-const Da = 1.0;
-const Db = 0.5;
-const dt = 1.0;
+// Gray-Scott constants (standard values for pattern formation)
+const Da = 1.0;     // Diffusion rate for A
+const Db = 0.5;     // Diffusion rate for B (A diffuses 2x faster)
+const dt = 1.0;     // Standard time step
+
 
 // Animation state
 let isPlaying = false;
 let animationId = null;
 
-// -----------------------------------------------------------
-// Vertex shader (fullscreen quad)
-// -----------------------------------------------------------
+// Simple vertex shader
 const vertexShaderSource = `
-attribute vec2 a_position;
-varying vec2 v_texCoord;
-void main() {
-    v_texCoord = a_position * 0.5 + 0.5;
-    gl_Position = vec4(a_position, 0.0, 1.0);
-}
+    attribute vec2 a_position;
+    varying vec2 v_texCoord;
+    void main() {
+        v_texCoord = a_position * 0.5 + 0.5;
+        gl_Position = vec4(a_position, 0.0, 1.0);
+    }
 `;
 
-// -----------------------------------------------------------
-// Display shader (nearest-neighbour + texel snapping)
-// -----------------------------------------------------------
+// Display shader
 const displayShaderSource = `
-precision highp float;
-varying vec2 v_texCoord;
-uniform sampler2D u_state;
-uniform vec3 u_customColor1;
-uniform vec3 u_customColor2;
-uniform vec2 u_simRes;
+    precision highp float;
+    varying vec2 v_texCoord;
+    uniform sampler2D u_state;
+    uniform vec3 u_customColor1;
+    uniform vec3 u_customColor2;
 
-void main() {
-    // Snap to simulation grid for crisp output
-    vec2 snapped = (floor(v_texCoord * u_simRes) + 0.5) / u_simRes;
+    void main() {
+        vec2 state = texture2D(u_state, v_texCoord).rg;
+        float B = state.g;
 
-    vec2 state = texture2D(u_state, snapped).rg;
-    float B = state.g;
+        // Linear gradient between custom colors based on B concentration
+        vec3 color = mix(u_customColor1, u_customColor2, B);
 
-    vec3 color = mix(u_customColor1, u_customColor2, B);
-    gl_FragColor = vec4(color, 1.0);
-}
+        gl_FragColor = vec4(color, 1.0);
+    }
 `;
 
-// -----------------------------------------------------------
-// Initialization shader (big seed)
-// -----------------------------------------------------------
+// Initialization shader - Karl Sims style (single center patch)
 const initShaderSource = `
-precision highp float;
-varying vec2 v_texCoord;
+    precision highp float;
+    varying vec2 v_texCoord;
+    uniform vec2 u_clusterPos;
+    uniform float u_seed;
 
-void main() {
-    float A = 1.0;
-    float B = 0.0;
+    void main() {
+        // Default: A=1.0, B=0.0 everywhere
+        float A = 1.0;
+        float B = 0.0;
 
-    // SMALL crisp seed at screen center (Karl Sims standard)
-    if (distance(v_texCoord, vec2(0.5, 0.5)) < 0.03) {
-        A = 0.0;
-        B = 1.0;
+        // Tiny seed at center (Karl Sims method)
+        // if (distance(v_texCoord, vec2(0.5)) < 0.005) {
+        if (distance(v_texCoord, vec2(0.5)) < 0.02) {
+            B = 1.0;
+            A = 0.0;
+        }
+
+        gl_FragColor = vec4(A, B, 0.0, 1.0);
+    }
+`;
+
+// Gray-Scott simulation shader - EXACT equations from user
+const rdShaderSource = `
+    precision highp float;
+    varying vec2 v_texCoord;
+    uniform sampler2D u_state;
+    uniform vec2 u_resolution;
+    uniform float u_feed;
+    uniform float u_kill;
+    uniform float u_Da;
+    uniform float u_Db;
+    uniform float u_dt;
+
+    void main() {
+        vec2 pixel = 1.0 / u_resolution;
+
+        // Sample current state
+        vec4 center = texture2D(u_state, v_texCoord);
+        float A = center.r;
+        float B = center.g;
+
+        // Correct 9-point Laplacian: ∇²
+        // center: -1.0, cardinals: 0.2 each, diagonals: 0.05 each
+        vec2 laplacian = -1.0 * center.rg;
+        // Cardinals (0.2 each)
+        laplacian += 0.2 * texture2D(u_state, v_texCoord + vec2(pixel.x, 0.0)).rg;
+        laplacian += 0.2 * texture2D(u_state, v_texCoord - vec2(pixel.x, 0.0)).rg;
+        laplacian += 0.2 * texture2D(u_state, v_texCoord + vec2(0.0, pixel.y)).rg;
+        laplacian += 0.2 * texture2D(u_state, v_texCoord - vec2(0.0, pixel.y)).rg;
+        // Diagonals (0.05 each)
+        laplacian += 0.05 * texture2D(u_state, v_texCoord + vec2(pixel.x, pixel.y)).rg;
+        laplacian += 0.05 * texture2D(u_state, v_texCoord + vec2(pixel.x, -pixel.y)).rg;
+        laplacian += 0.05 * texture2D(u_state, v_texCoord + vec2(-pixel.x, pixel.y)).rg;
+        laplacian += 0.05 * texture2D(u_state, v_texCoord + vec2(-pixel.x, -pixel.y)).rg;
+
+        // Reaction term: A·B²
+        float reaction = A * B * B;
+
+        // Spatial FK-map: feed/kill vary across screen
+        // float kMin = 0.01413;
+        // float kMax = 0.06534;
+        // float fMin = 0.002;
+        // float fMax = 0.12;
+        // Kill varies left → right : 0.045 → 0.070
+        float kMin = 0.045;
+        float kMax = 0.070;
+        float k = mix(kMin, kMax, v_texCoord.x);
+        
+        // Feed varies top → bottom : 0.10 → 0.01
+        float fMax = 0.10;
+        float fMin = 0.01;
+        float f = mix(fMin, fMax, v_texCoord.y);
+
+        // Gray-Scott equations with spatially-varying f/k:
+        // A′ = A + (Dₐ∇²A − A·B² + f(1−A)) Δt
+        // B′ = B + (Db∇²B + A·B² − (k+f)B) Δt
+
+        float A_new = A + (u_Da * laplacian.r - reaction + f * (1.0 - A)) * u_dt;
+        float B_new = B + (u_Db * laplacian.g + reaction - (k + f) * B) * u_dt;
+
+        // Clamp to [0,1] to prevent numerical issues
+        A_new = clamp(A_new, 0.0, 1.0);
+        B_new = clamp(B_new, 0.0, 1.0);
+
+        gl_FragColor = vec4(A_new, B_new, 0.0, 1.0);
+    }
+`;
+
+// Compile shader
+function compileShader(source, type) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error('Shader compile error:', gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
     }
 
-    gl_FragColor = vec4(A, B, 0.0, 1.0);
-}
-`;
-
-// -----------------------------------------------------------
-// Reaction–diffusion shader (with spatial F/K field)
-// -----------------------------------------------------------
-const rdShaderSource = `
-precision highp float;
-varying vec2 v_texCoord;
-
-uniform sampler2D u_state;
-uniform vec2 u_simRes;
-uniform float u_Da;
-uniform float u_Db;
-uniform float u_dt;
-
-void main() {
-    vec2 pixel = 1.0 / u_simRes;
-
-    vec4 center = texture2D(u_state, v_texCoord);
-    float A = center.r;
-    float B = center.g;
-
-    // 9-point Laplacian (classic Karl Sims / Gray-Scott)
-    vec2 lap = -1.0 * center.rg;
-
-    // Cardinals
-    lap += 0.2 * texture2D(u_state, v_texCoord + vec2(pixel.x, 0.0)).rg;
-    lap += 0.2 * texture2D(u_state, v_texCoord - vec2(pixel.x, 0.0)).rg;
-    lap += 0.2 * texture2D(u_state, v_texCoord + vec2(0.0, pixel.y)).rg;
-    lap += 0.2 * texture2D(u_state, v_texCoord - vec2(0.0, pixel.y)).rg;
-
-    // Diagonals
-    lap += 0.05 * texture2D(u_state, v_texCoord + vec2(pixel.x, pixel.y)).rg;
-    lap += 0.05 * texture2D(u_state, v_texCoord + vec2(pixel.x, -pixel.y)).rg;
-    lap += 0.05 * texture2D(u_state, v_texCoord + vec2(-pixel.x, pixel.y)).rg;
-    lap += 0.05 * texture2D(u_state, v_texCoord + vec2(-pixel.x, -pixel.y)).rg;
-
-    // Reaction term
-    float reaction = A * B * B;
-
-    // ---------------------------------------------------
-    // SPATIAL FEED/KILL FIELD (Karl Sims parameter map)
-    // ---------------------------------------------------
-    float k = mix(0.045, 0.070, v_texCoord.x);     // left→right
-    float f = mix(0.10, 0.01, v_texCoord.y);       // top→bottom
-
-    // Gray-Scott model
-    float A_new = A + (u_Da * lap.r - reaction + f * (1.0 - A)) * u_dt;
-    float B_new = B + (u_Db * lap.g + reaction - (k + f) * B) * u_dt;
-
-    gl_FragColor = vec4(clamp(A_new, 0.0, 1.0),
-                        clamp(B_new, 0.0, 1.0),
-                        0.0, 1.0);
-}
-`;
-
-// -----------------------------------------------------------
-// GL helpers
-// -----------------------------------------------------------
-function compileShader(src, type) {
-    const sh = gl.createShader(type);
-    gl.shaderSource(sh, src);
-    gl.compileShader(sh);
-    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS))
-        throw new Error(gl.getShaderInfoLog(sh));
-    return sh;
+    return shader;
 }
 
-function createProgram(vs, fs) {
-    const p = gl.createProgram();
-    gl.attachShader(p, compileShader(vs, gl.VERTEX_SHADER));
-    gl.attachShader(p, compileShader(fs, gl.FRAGMENT_SHADER));
-    gl.linkProgram(p);
-    if (!gl.getProgramParameter(p, gl.LINK_STATUS))
-        throw new Error(gl.getProgramInfoLog(p));
-    return p;
+// Create program
+function createProgram(vertexSource, fragmentSource) {
+    const vertexShader = compileShader(vertexSource, gl.VERTEX_SHADER);
+    const fragmentShader = compileShader(fragmentSource, gl.FRAGMENT_SHADER);
+
+    const program = gl.createProgram();
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        console.error('Program link error:', gl.getProgramInfoLog(program));
+        return null;
+    }
+
+    return program;
 }
 
+// Create texture
 function createTexture() {
-    const tex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, tex);
+    const texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, SIM_W, SIM_H, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    return tex;
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, canvas.width, canvas.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    return texture;
 }
 
-function createFramebuffer(tex) {
+// Create framebuffer
+function createFramebuffer(texture) {
     const fb = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
     return fb;
 }
 
+// Setup fullscreen quad
+function setupQuad() {
+    const positions = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
+    const buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+    return buffer;
+}
+
+// Create programs
 const rdProgram = createProgram(vertexShaderSource, rdShaderSource);
 const displayProgram = createProgram(vertexShaderSource, displayShaderSource);
 const initProgram = createProgram(vertexShaderSource, initShaderSource);
 
-const textures = { ping: createTexture(), pong: createTexture() };
+// Create textures for ping-pong rendering
+const textures = {
+    ping: createTexture(),
+    pong: createTexture()
+};
+
 const framebuffers = {
     ping: createFramebuffer(textures.ping),
     pong: createFramebuffer(textures.pong)
 };
 
-let current = "ping";
+let current = 'ping';
 
-const quadBuffer = (() => {
-    const b = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, b);
-    gl.bufferData(gl.ARRAY_BUFFER,
-        new Float32Array([-1,-1, 1,-1, -1,1, 1,1]),
-        gl.STATIC_DRAW
-    );
-    return b;
-})();
+// Create quad
+const quadBuffer = setupQuad();
 
-// -----------------------------------------------------------
-// Initialization
-// -----------------------------------------------------------
+// Random cluster position (will be set on initialization)
+let clusterPos = [Math.random(), Math.random()];
+
+// Initialize simulation
 function initialize() {
-    gl.viewport(0, 0, SIM_W, SIM_H);
+    console.log('Initializing Karl Sims RD simulation');
+
+    gl.viewport(0, 0, canvas.width, canvas.height);
     gl.useProgram(initProgram);
 
-    const pos = gl.getAttribLocation(initProgram, "a_position");
-    gl.enableVertexAttribArray(pos);
+    const posLoc = gl.getAttribLocation(initProgram, 'a_position');
+    gl.enableVertexAttribArray(posLoc);
     gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
-    gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
 
-    // Write init state to both buffers
+    // Set random cluster position and seed
+    clusterPos = [Math.random(), Math.random()];
+    gl.uniform2f(gl.getUniformLocation(initProgram, 'u_clusterPos'), clusterPos[0], clusterPos[1]);
+    gl.uniform1f(gl.getUniformLocation(initProgram, 'u_seed'), Math.random() * 1000.0 + 1.0);
+
+    // Initialize both buffers
     gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.ping);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
     gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.pong);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
-    current = "ping";
+    current = 'ping';
+
+    // Display initial state
     display();
+
+    console.log('Initialization complete');
 }
 
-// -----------------------------------------------------------
-// Simulation step
-// -----------------------------------------------------------
+// Run one simulation step
 function step() {
-    const next = current === "ping" ? "pong" : "ping";
+    const next = current === 'ping' ? 'pong' : 'ping';
 
-    gl.viewport(0, 0, SIM_W, SIM_H);
+    gl.viewport(0, 0, canvas.width, canvas.height);
     gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers[next]);
     gl.useProgram(rdProgram);
 
-    const pos = gl.getAttribLocation(rdProgram, "a_position");
-    gl.enableVertexAttribArray(pos);
+    const posLoc = gl.getAttribLocation(rdProgram, 'a_position');
+    gl.enableVertexAttribArray(posLoc);
     gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
-    gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
 
-    gl.uniform2f(gl.getUniformLocation(rdProgram, "u_simRes"), SIM_W, SIM_H);
-    gl.uniform1f(gl.getUniformLocation(rdProgram, "u_Da"), Da);
-    gl.uniform1f(gl.getUniformLocation(rdProgram, "u_Db"), Db);
-    gl.uniform1f(gl.getUniformLocation(rdProgram, "u_dt"), dt);
+    // Set uniforms
+    gl.uniform2f(gl.getUniformLocation(rdProgram, 'u_resolution'), canvas.width, canvas.height);
+    gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_feed'), feed);
+    gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_kill'), kill);
+    gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_Da'), Da);
+    gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_Db'), Db);
+    gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_dt'), dt);
 
+    // Bind current state texture
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, textures[current]);
-    gl.uniform1i(gl.getUniformLocation(rdProgram, "u_state"), 0);
+    gl.uniform1i(gl.getUniformLocation(rdProgram, 'u_state'), 0);
 
+    // Draw
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
     current = next;
 }
 
-// -----------------------------------------------------------
 // Animation loop
-// -----------------------------------------------------------
 function animate() {
     if (!isPlaying) return;
 
-    for (let i = 0; i < 8; i++) step(); // Same speed you used
+    // Run a few iterations per frame (NOT 50 - that overshoots!)
+    for (let i = 0; i < 8; i++) {
+        step();
+    }
 
+    // Display result
     display();
+
+    // Continue animation
     animationId = requestAnimationFrame(animate);
 }
 
-// -----------------------------------------------------------
-// Display (fullscreen, crisp scaling)
-// -----------------------------------------------------------
+// Toggle play/pause
+function togglePlayPause() {
+    isPlaying = !isPlaying;
+
+    const playPauseBtn = document.getElementById('playPauseBtn');
+
+    if (isPlaying) {
+        playPauseBtn.textContent = 'Pause';
+        animate();
+    } else {
+        playPauseBtn.textContent = 'Play';
+        if (animationId) {
+            cancelAnimationFrame(animationId);
+            animationId = null;
+        }
+    }
+}
+
+// Display to screen
 function display() {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, canvas.width, canvas.height);
-
     gl.useProgram(displayProgram);
 
-    const pos = gl.getAttribLocation(displayProgram, "a_position");
-    gl.enableVertexAttribArray(pos);
+    const posLoc = gl.getAttribLocation(displayProgram, 'a_position');
+    gl.enableVertexAttribArray(posLoc);
     gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
-    gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
 
+    // Bind current state
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, textures[current]);
-    gl.uniform1i(gl.getUniformLocation(displayProgram, "u_state"), 0);
+    gl.uniform1i(gl.getUniformLocation(displayProgram, 'u_state'), 0);
 
-    gl.uniform2f(gl.getUniformLocation(displayProgram, "u_simRes"), SIM_W, SIM_H);
-    gl.uniform3f(gl.getUniformLocation(displayProgram, "u_customColor1"), ...customColor1);
-    gl.uniform3f(gl.getUniformLocation(displayProgram, "u_customColor2"), ...customColor2);
+    // Set custom colors
+    gl.uniform3f(gl.getUniformLocation(displayProgram, 'u_customColor1'), customColor1[0], customColor1[1], customColor1[2]);
+    gl.uniform3f(gl.getUniformLocation(displayProgram, 'u_customColor2'), customColor2[0], customColor2[1], customColor2[2]);
 
+    // Draw
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
 
-// -----------------------------------------------------------
-// UI
-// -----------------------------------------------------------
+// Helper function to convert hex color to RGB 0-1 range
 function hexToRgb(hex) {
-    const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-    return m ? [parseInt(m[1],16)/255, parseInt(m[2],16)/255, parseInt(m[3],16)/255] : [1,1,1];
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? [
+        parseInt(result[1], 16) / 255,
+        parseInt(result[2], 16) / 255,
+        parseInt(result[3], 16) / 255
+    ] : [1.0, 1.0, 1.0];
 }
 
+// Setup UI controls
 function setupControls() {
-    const resetBtn = document.getElementById("resetBtn");
-    const playPauseBtn = document.getElementById("playPauseBtn");
-    const color1Picker = document.getElementById("color1");
-    const color2Picker = document.getElementById("color2");
-    const menu = document.getElementById("menu");
+    const resetBtn = document.getElementById('resetBtn');
+    const playPauseBtn = document.getElementById('playPauseBtn');
+    const paramSelector = document.getElementById('paramSelector');
+    const paramCrosshair = document.getElementById('paramCrosshair');
+    const feedValue = document.getElementById('feedValue');
+    const killValue = document.getElementById('killValue');
+    const menu = document.getElementById('menu');
+    const color1Picker = document.getElementById('color1');
+    const color2Picker = document.getElementById('color2');
 
-    playPauseBtn.addEventListener("click", () => {
-        isPlaying = !isPlaying;
-        playPauseBtn.textContent = isPlaying ? "Pause" : "Play";
-        if (isPlaying) animate();
-        else if (animationId) cancelAnimationFrame(animationId);
+    // Play/Pause button
+    playPauseBtn.addEventListener('click', () => {
+        console.log('Play/Pause button clicked');
+        togglePlayPause();
     });
 
-    resetBtn.addEventListener("click", () => {
+    // Color pickers
+    color1Picker.addEventListener('input', (e) => {
+        customColor1 = hexToRgb(e.target.value);
+        display(); // Update display immediately
+    });
+
+    color2Picker.addEventListener('input', (e) => {
+        customColor2 = hexToRgb(e.target.value);
+        display(); // Update display immediately
+    });
+
+    // Reset button
+    resetBtn.addEventListener('click', () => {
+        console.log('Reset button clicked');
+
+        // Stop animation if playing
         if (isPlaying) {
-            isPlaying = false;
-            cancelAnimationFrame(animationId);
-            playPauseBtn.textContent = "Play";
+            togglePlayPause();
         }
+
         initialize();
     });
 
-    color1Picker.addEventListener("input", e => { customColor1 = hexToRgb(e.target.value); display(); });
-    color2Picker.addEventListener("input", e => { customColor2 = hexToRgb(e.target.value); display(); });
+    // Parameter selector (X/Y for kill/feed)
+    let isDragging = false;
 
-    document.addEventListener("keydown", e => {
-        if (e.key === "m" || e.key === "M") menu.classList.toggle("closed");
+    function updateParameters(e) {
+        const rect = paramSelector.getBoundingClientRect();
+        const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+
+        // X axis: kill (0.01413 to 0.06534)
+        kill = 0.01413 + x * (0.06534 - 0.01413);
+
+        // Y axis: feed (0.002 to 0.12) - inverted (top = high)
+        feed = 0.12 - y * (0.12 - 0.002);
+
+        // Update display
+        killValue.textContent = kill.toFixed(5);
+        feedValue.textContent = feed.toFixed(5);
+
+        // Update crosshair position
+        paramCrosshair.style.left = (x * 100) + '%';
+        paramCrosshair.style.top = (y * 100) + '%';
+    }
+
+    paramSelector.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        updateParameters(e);
     });
 
-    menu.classList.add("closed");
+    document.addEventListener('mousemove', (e) => {
+        if (isDragging) {
+            updateParameters(e);
+        }
+    });
+
+    document.addEventListener('mouseup', () => {
+        isDragging = false;
+    });
+
+    // Initialize crosshair position for default values
+    const initialX = (kill - 0.01413) / (0.06534 - 0.01413);
+    const initialY = 1.0 - (feed - 0.002) / (0.12 - 0.002);
+    paramCrosshair.style.left = (initialX * 100) + '%';
+    paramCrosshair.style.top = (initialY * 100) + '%';
+    feedValue.textContent = feed.toFixed(5);
+    killValue.textContent = kill.toFixed(5);
+
+    // Keyboard control - 'm' key toggles menu
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'm' || e.key === 'M') {
+            menu.classList.toggle('closed');
+        }
+    });
+
+    // Start with menu closed
+    menu.classList.add('closed');
 }
 
-// -----------------------------------------------------------
 // Start
-// -----------------------------------------------------------
+console.log('Starting Gray-Scott simulation');
+console.log('Default parameters: feed =', feed, ', kill =', kill);
+console.log('Constants: Da =', Da, ', Db =', Db, ', dt =', dt);
+
 setupControls();
 initialize();
-
