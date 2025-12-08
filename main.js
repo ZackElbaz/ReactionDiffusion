@@ -124,13 +124,15 @@ const rdShaderSource = `
         // float kMax = 0.06534;
         // float fMin = 0.002;
         // float fMax = 0.12;
+        // Kill varies left → right : 0.045 → 0.070
         float kMin = 0.045;
-        float kMax = 0.07;
-        float fMin = 0.01;
-        float fMax = 0.10;
+        float kMax = 0.070;
+        float k = mix(kMin, kMax, v_texCoord.x);
         
-        float k = kMin + v_texCoord.x * (kMax - kMin);
-        float f = fMin + v_texCoord.y * (fMax - fMin);
+        // Feed varies top → bottom : 0.10 → 0.01
+        float fMax = 0.10;
+        float fMin = 0.01;
+        float f = mix(fMax, fMin, v_texCoord.y);
 
         // Gray-Scott equations with spatially-varying f/k:
         // A′ = A + (Dₐ∇²A − A·B² + f(1−A)) Δt
