@@ -25,9 +25,13 @@ let customColor1 = [1.0, 1.0, 1.0]; // White (low B)
 let customColor2 = [0.0, 0.0, 0.0]; // Black (high B)
 
 // Gray-Scott constants (scaled for numerical stability)
-const Da = 0.2097;  // Diffusion rate for A (from Pearson paper)
-const Db = 0.105;   // Diffusion rate for B (A diffuses 2x faster)
-const dt = 1.0;     // Time step
+const Da = 0.16;    // Diffusion rate for A
+const Db = 0.08;    // Diffusion rate for B (A diffuses 2x faster)
+const dt = 0.5;     // Smaller time step for stability
+
+// Animation state
+let isPlaying = false;
+let animationId = null;
 
 // Simple vertex shader
 const vertexShaderSource = `
@@ -276,9 +280,40 @@ function step() {
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
     current = next;
+}
+
+// Animation loop
+function animate() {
+    if (!isPlaying) return;
+
+    // Run multiple iterations per frame for smooth evolution
+    for (let i = 0; i < 10; i++) {
+        step();
+    }
 
     // Display result
     display();
+
+    // Continue animation
+    animationId = requestAnimationFrame(animate);
+}
+
+// Toggle play/pause
+function togglePlayPause() {
+    isPlaying = !isPlaying;
+
+    const playPauseBtn = document.getElementById('playPauseBtn');
+
+    if (isPlaying) {
+        playPauseBtn.textContent = 'Pause';
+        animate();
+    } else {
+        playPauseBtn.textContent = 'Play';
+        if (animationId) {
+            cancelAnimationFrame(animationId);
+            animationId = null;
+        }
+    }
 }
 
 // Display to screen
@@ -318,7 +353,7 @@ function hexToRgb(hex) {
 // Setup UI controls
 function setupControls() {
     const resetBtn = document.getElementById('resetBtn');
-    const stepBtn = document.getElementById('stepBtn');
+    const playPauseBtn = document.getElementById('playPauseBtn');
     const paramSelector = document.getElementById('paramSelector');
     const paramCrosshair = document.getElementById('paramCrosshair');
     const feedValue = document.getElementById('feedValue');
@@ -327,10 +362,10 @@ function setupControls() {
     const color1Picker = document.getElementById('color1');
     const color2Picker = document.getElementById('color2');
 
-    // Step button - render next frame
-    stepBtn.addEventListener('click', () => {
-        console.log('Step button clicked - running one iteration');
-        step();
+    // Play/Pause button
+    playPauseBtn.addEventListener('click', () => {
+        console.log('Play/Pause button clicked');
+        togglePlayPause();
     });
 
     // Color pickers
@@ -347,6 +382,12 @@ function setupControls() {
     // Reset button
     resetBtn.addEventListener('click', () => {
         console.log('Reset button clicked');
+
+        // Stop animation if playing
+        if (isPlaying) {
+            togglePlayPause();
+        }
+
         initialize();
     });
 
