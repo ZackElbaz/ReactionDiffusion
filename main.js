@@ -11,8 +11,8 @@ if (!gl) {
 canvas.style.width = '100vw';
 canvas.style.height = '100vh';
 
-// Use small grid to see how the code is working
-const GRID_SIZE = 100;
+// Use appropriately sized grid for pattern formation
+const GRID_SIZE = 256;
 canvas.width = GRID_SIZE;
 canvas.height = GRID_SIZE;
 
@@ -25,9 +25,6 @@ let gradientOrientation = 'right-left';
 // Custom gradient colors (RGB in 0-1 range)
 let customColor1 = [1.0, 1.0, 1.0]; // White
 let customColor2 = [0.0, 0.0, 0.0]; // Black
-
-// Time counter for perturbations
-let timeCounter = 0.0;
 
 // Simple vertex shader
 const vertexShaderSource = `
@@ -169,7 +166,6 @@ const rdShaderSource = `
     uniform vec2 u_resolution;
     uniform float u_feed;
     uniform float u_kill;
-    uniform float u_time;
 
     void main() {
         vec2 pixel = 1.0 / u_resolution;
@@ -179,31 +175,27 @@ const rdShaderSource = `
         float A = center.r;
         float B = center.g;
 
-        // 5-point Laplacian
-        vec2 lap = center.rg * -4.0;
-        lap += texture2D(u_state, v_texCoord + vec2(0.0, pixel.y)).rg;
-        lap += texture2D(u_state, v_texCoord + vec2(pixel.x, 0.0)).rg;
-        lap += texture2D(u_state, v_texCoord - vec2(0.0, pixel.y)).rg;
-        lap += texture2D(u_state, v_texCoord - vec2(pixel.x, 0.0)).rg;
+        // 5-point Laplacian (discrete approximation of ∇²)
+        vec2 lap = -center.rg;
+        lap += 0.2 * texture2D(u_state, v_texCoord + vec2(0.0, pixel.y)).rg;
+        lap += 0.2 * texture2D(u_state, v_texCoord + vec2(pixel.x, 0.0)).rg;
+        lap += 0.2 * texture2D(u_state, v_texCoord - vec2(0.0, pixel.y)).rg;
+        lap += 0.2 * texture2D(u_state, v_texCoord - vec2(pixel.x, 0.0)).rg;
 
-        // Constants - using much smaller values for numerical stability
-        float Da = 1.0;  // Diffusion rate for A
-        float Db = 0.5;  // Diffusion rate for B (slower than A)
-        float dt = 0.2;  // Smaller time step prevents divergence
-        float f = u_feed;
-        float k = u_kill;
+        // Constants for Gray-Scott model
+        float Du = 0.16;  // Diffusion rate for u (A)
+        float Dv = 0.08;  // Diffusion rate for v (B) - half of Du
+        float f = u_feed;  // Feed rate
+        float k = u_kill;  // Kill rate
 
-        // Reaction term
+        // Reaction term: u·v²
         float reaction = A * B * B;
 
         // Gray-Scott equations
-        float A_new = A + (Da * lap.r - reaction + f * (1.0 - A)) * dt;
-        float B_new = B + (Db * lap.g + reaction - (k + f) * B) * dt;
-
-        // Add tiny random perturbations to prevent complete equilibrium
-        float rand = fract(sin(dot(v_texCoord + u_time, vec2(12.9898, 78.233))) * 43758.5453);
-        float perturbation = (rand - 0.5) * 0.001;
-        B_new += perturbation;
+        // ∂u/∂t = Du∇²u - uv² + F(1-u)
+        // ∂v/∂t = Dv∇²v + uv² - (k+F)v
+        float A_new = A + (Du * lap.r - reaction + f * (1.0 - A));
+        float B_new = B + (Dv * lap.g + reaction - (k + f) * B);
 
         // Clamp values to prevent divergence outside [0,1]
         A_new = clamp(A_new, 0.0, 1.0);
@@ -340,7 +332,6 @@ function simulate() {
     gl.uniform2f(gl.getUniformLocation(rdProgram, 'u_resolution'), width, height);
     gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_feed'), feed);
     gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_kill'), kill);
-    gl.uniform1f(gl.getUniformLocation(rdProgram, 'u_time'), timeCounter);
 
     // Bind current state texture
     gl.activeTexture(gl.TEXTURE0);
@@ -351,7 +342,6 @@ function simulate() {
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
     current = next;
-    timeCounter += 0.01;
 }
 
 // Display to screen
@@ -389,8 +379,8 @@ function display() {
 
 // Main loop
 function loop() {
-    // Run many iterations per frame (more needed with smaller dt)
-    for (let i = 0; i < 32; i++) {
+    // Run multiple iterations per frame
+    for (let i = 0; i < 16; i++) {
         simulate();
     }
 
