@@ -15,19 +15,19 @@ canvas.style.width = '100vw';
 canvas.style.height = '100vh';
 canvas.style.imageRendering = 'pixelated'; // Make grid visible
 
-// Simulation parameters - default from user
-let feed = 0.055;
-let kill = 0.062;
+// Simulation parameters - "worms" preset for classic pattern
+let feed = 0.0367;
+let kill = 0.0649;
 let currentColorMap = 'custom';
 
 // Custom gradient colors (RGB in 0-1 range)
 let customColor1 = [1.0, 1.0, 1.0]; // White (low B)
 let customColor2 = [0.0, 0.0, 0.0]; // Black (high B)
 
-// Gray-Scott constants (scaled for numerical stability)
-const Da = 0.16;    // Diffusion rate for A
-const Db = 0.08;    // Diffusion rate for B (A diffuses 2x faster)
-const dt = 0.5;     // Smaller time step for stability
+// Gray-Scott constants (standard values for pattern formation)
+const Da = 1.0;     // Diffusion rate for A
+const Db = 0.5;     // Diffusion rate for B (A diffuses 2x faster)
+const dt = 0.1;     // Small time step for stability with normalized Laplacian
 
 // Animation state
 let isPlaying = false;
@@ -62,24 +62,36 @@ const displayShaderSource = `
     }
 `;
 
-// Initialization shader - single random cluster
+// Initialization shader - random cluster with small B seeding
 const initShaderSource = `
     precision highp float;
     varying vec2 v_texCoord;
     uniform vec2 u_clusterPos;
+    uniform float u_seed;
+
+    float random(vec2 st) {
+        return fract(sin(dot(st, vec2(12.9898, 78.233))) * 43758.5453 * u_seed);
+    }
 
     void main() {
         // Default: A=1.0, B=0.0 everywhere
         float A = 1.0;
         float B = 0.0;
 
-        // Create a single cluster at random position
+        // Create a central cluster at random position
         float dist = distance(v_texCoord, u_clusterPos);
 
-        if (dist < 0.05) {
+        if (dist < 0.1) {
             // Central high concentration of B
             B = 1.0;
             A = 0.0;
+        }
+
+        // Add small random B seeding across the canvas (critical for pattern formation)
+        float rand = random(v_texCoord * 100.0);
+        if (rand > 0.98) {
+            B = 0.5 + random(v_texCoord * 50.0) * 0.5;
+            A = 1.0 - B;
         }
 
         gl_FragColor = vec4(A, B, 0.0, 1.0);
@@ -106,14 +118,13 @@ const rdShaderSource = `
         float A = center.r;
         float B = center.g;
 
-        // 5-point Laplacian: ∇²
-        // lap = (sum of 4 neighbors) - 4*center
-        vec2 laplacian = vec2(0.0);
-        laplacian += texture2D(u_state, v_texCoord + vec2(pixel.x, 0.0)).rg;
-        laplacian += texture2D(u_state, v_texCoord - vec2(pixel.x, 0.0)).rg;
-        laplacian += texture2D(u_state, v_texCoord + vec2(0.0, pixel.y)).rg;
-        laplacian += texture2D(u_state, v_texCoord - vec2(0.0, pixel.y)).rg;
-        laplacian -= 4.0 * center.rg;
+        // Normalized 5-point Laplacian: ∇²
+        // center: -1.0, each cardinal neighbor: 0.2
+        vec2 laplacian = -1.0 * center.rg;
+        laplacian += 0.2 * texture2D(u_state, v_texCoord + vec2(pixel.x, 0.0)).rg;
+        laplacian += 0.2 * texture2D(u_state, v_texCoord - vec2(pixel.x, 0.0)).rg;
+        laplacian += 0.2 * texture2D(u_state, v_texCoord + vec2(0.0, pixel.y)).rg;
+        laplacian += 0.2 * texture2D(u_state, v_texCoord - vec2(0.0, pixel.y)).rg;
 
         // Reaction term: A·B²
         float reaction = A * B * B;
@@ -231,9 +242,10 @@ function initialize() {
     gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
     gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
 
-    // Set random cluster position
+    // Set random cluster position and seed
     clusterPos = [Math.random(), Math.random()];
     gl.uniform2f(gl.getUniformLocation(initProgram, 'u_clusterPos'), clusterPos[0], clusterPos[1]);
+    gl.uniform1f(gl.getUniformLocation(initProgram, 'u_seed'), Math.random() * 1000.0 + 1.0);
 
     // Initialize both buffers
     gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffers.ping);
@@ -286,8 +298,8 @@ function step() {
 function animate() {
     if (!isPlaying) return;
 
-    // Run multiple iterations per frame for smooth evolution
-    for (let i = 0; i < 10; i++) {
+    // Run multiple iterations per frame (more needed with smaller dt)
+    for (let i = 0; i < 50; i++) {
         step();
     }
 
