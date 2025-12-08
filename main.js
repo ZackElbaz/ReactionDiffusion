@@ -175,10 +175,10 @@ const rdShaderSource = `
         lap += texture2D(u_state, v_texCoord - vec2(0.0, pixel.y)).rg;
         lap += texture2D(u_state, v_texCoord - vec2(pixel.x, 0.0)).rg;
 
-        // Constants
+        // Constants - using much smaller values for numerical stability
         float Da = 1.0;  // Diffusion rate for A
         float Db = 0.5;  // Diffusion rate for B (slower than A)
-        float dt = 1.0;  // Time step
+        float dt = 0.2;  // Smaller time step prevents divergence
         float f = u_feed;
         float k = u_kill;
 
@@ -188,6 +188,10 @@ const rdShaderSource = `
         // Gray-Scott equations
         float A_new = A + (Da * lap.r - reaction + f * (1.0 - A)) * dt;
         float B_new = B + (Db * lap.g + reaction - (k + f) * B) * dt;
+
+        // Clamp values to prevent divergence outside [0,1]
+        A_new = clamp(A_new, 0.0, 1.0);
+        B_new = clamp(B_new, 0.0, 1.0);
 
         gl_FragColor = vec4(A_new, B_new, 0.0, 1.0);
     }
@@ -367,8 +371,8 @@ function display() {
 
 // Main loop
 function loop() {
-    // Run many iterations per frame to keep patterns evolving
-    for (let i = 0; i < 16; i++) {
+    // Run many iterations per frame (more needed with smaller dt)
+    for (let i = 0; i < 32; i++) {
         simulate();
     }
 
