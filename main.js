@@ -11,8 +11,8 @@ if (!gl) {
 canvas.style.width = '100vw';
 canvas.style.height = '100vh';
 
-// Use larger grid for finer detail while keeping patterns visible
-const GRID_SIZE = 800;
+// Use small grid to see how the code is working
+const GRID_SIZE = 100;
 canvas.width = GRID_SIZE;
 canvas.height = GRID_SIZE;
 
@@ -134,30 +134,18 @@ const initShaderSource = `
         float A = 1.0;
         float B = 0.0;
 
-        // Add tiny random noise to break symmetry (critical for pattern formation)
-        // Noise range: -0.01 to +0.01
-        float noise1 = (random(v_texCoord * 100.0) - 0.5) * 0.02;
-        float noise2 = (random(v_texCoord * 200.0) - 0.5) * 0.02;
-
-        A = clamp(A + noise1, 0.0, 1.0);
-        B = clamp(B + noise2, 0.0, 1.0);
-
-        // Add a small central seed region for B to start pattern formation
+        // Add a small central square with high B to seed the pattern
         vec2 center = vec2(0.5, 0.5);
-        float dist = distance(v_texCoord, center);
+        float size = 0.1;
 
-        if (dist < 0.05) {
-            // Central circle with high B concentration
-            B = 0.9 + random(v_texCoord * 50.0) * 0.1;
-            A = 0.1;
-        } else {
-            // Scattered tiny seed points across the grid
-            float rand = random(v_texCoord * 10.0);
-            if (rand > 0.98) {
-                B = 0.5 + random(v_texCoord * 25.0) * 0.5;
-                A = 1.0 - B;
-            }
+        if (abs(v_texCoord.x - center.x) < size && abs(v_texCoord.y - center.y) < size) {
+            B = 1.0;
+            A = 0.0;
         }
+
+        // Add tiny random noise everywhere to break symmetry
+        float noise = (random(v_texCoord * 100.0) - 0.5) * 0.02;
+        B = clamp(B + noise, 0.0, 1.0);
 
         gl_FragColor = vec4(A, B, 0.0, 1.0);
     }
@@ -379,8 +367,8 @@ function display() {
 
 // Main loop
 function loop() {
-    // Run multiple iterations per frame for smooth evolution
-    for (let i = 0; i < 8; i++) {
+    // Run many iterations per frame to keep patterns evolving
+    for (let i = 0; i < 16; i++) {
         simulate();
     }
 
