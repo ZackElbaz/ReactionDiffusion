@@ -11,8 +11,8 @@ if (!gl) {
 canvas.style.width = '100vw';
 canvas.style.height = '100vh';
 
-// Use smaller grid for simulation (makes patterns thicker and more dynamic)
-const GRID_SIZE = 512;
+// Use larger grid for finer detail while keeping patterns visible
+const GRID_SIZE = 800;
 canvas.width = GRID_SIZE;
 canvas.height = GRID_SIZE;
 
@@ -119,7 +119,7 @@ const displayShaderSource = `
     }
 `;
 
-// STEP 2: Initialize with continuous concentration values
+// STEP 2: Initialize with tiny concentration variations
 const initShaderSource = `
     precision highp float;
     varying vec2 v_texCoord;
@@ -130,24 +130,33 @@ const initShaderSource = `
     }
 
     void main() {
-        // Start with full concentration of A everywhere
+        // Start with A=1.0, B=0.0 everywhere (chemical A fills the space)
         float A = 1.0;
+        float B = 0.0;
 
-        // Add small random noise for B (0.0 to 0.05) everywhere
-        float noise = random(v_texCoord * 100.0) * 0.05;
+        // Add tiny random noise to break symmetry (critical for pattern formation)
+        // Noise range: -0.01 to +0.01
+        float noise1 = (random(v_texCoord * 100.0) - 0.5) * 0.02;
+        float noise2 = (random(v_texCoord * 200.0) - 0.5) * 0.02;
 
-        // Create scattered spots with higher B concentration (0.5 to 1.0)
-        float rand1 = random(v_texCoord * 3.0);
-        float rand2 = random(v_texCoord * 7.0);
+        A = clamp(A + noise1, 0.0, 1.0);
+        B = clamp(B + noise2, 0.0, 1.0);
 
-        float B = noise;
+        // Add a small central seed region for B to start pattern formation
+        vec2 center = vec2(0.5, 0.5);
+        float dist = distance(v_texCoord, center);
 
-        // In some spots, add more B (but still keep some A)
-        if (rand1 > 0.95 || rand2 > 0.98) {
-            // Add B concentration between 0.5 and 1.0
-            B = 0.5 + random(v_texCoord * 13.0) * 0.5;
-            // Reduce A accordingly, but don't make it zero
-            A = 1.0 - B * 0.5;
+        if (dist < 0.05) {
+            // Central circle with high B concentration
+            B = 0.9 + random(v_texCoord * 50.0) * 0.1;
+            A = 0.1;
+        } else {
+            // Scattered tiny seed points across the grid
+            float rand = random(v_texCoord * 10.0);
+            if (rand > 0.98) {
+                B = 0.5 + random(v_texCoord * 25.0) * 0.5;
+                A = 1.0 - B;
+            }
         }
 
         gl_FragColor = vec4(A, B, 0.0, 1.0);
@@ -181,7 +190,7 @@ const rdShaderSource = `
         // Constants
         float Da = 1.0;  // Diffusion rate for A
         float Db = 0.5;  // Diffusion rate for B (slower than A)
-        float dt = 0.6;  // Time step - smaller for more gradual evolution
+        float dt = 1.0;  // Time step
         float f = u_feed;
         float k = u_kill;
 
@@ -370,8 +379,8 @@ function display() {
 
 // Main loop
 function loop() {
-    // Run multiple iterations per frame for continuous evolution
-    for (let i = 0; i < 12; i++) {
+    // Run multiple iterations per frame for smooth evolution
+    for (let i = 0; i < 8; i++) {
         simulate();
     }
 
